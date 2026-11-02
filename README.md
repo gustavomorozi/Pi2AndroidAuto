@@ -16,6 +16,17 @@ companion `carlinkit-lite-s` notes. This project is the next step: a Raspberry
 Pi running Android, acting as the "phone," generating its own content instead
 of relaying a real device's screen.
 
+## Hardware / OS this targets
+
+Developed and tested against a **Raspberry Pi 5** running
+[KonstaKang's unofficial LineageOS 24.0 Android TV build](https://konstakang.com/devices/rpi5/LineageOS24-ATV/)
+(Android 17). That build already has working USB-C gadget mode (ADB/MTP/PTP/tethering
+confirmed), which is what this app needs to be able to act as a USB accessory when
+plugged into a car — no kernel/driver changes required on top of it.
+
+Should work on any Android device with a USB port that supports gadget/accessory
+mode; the Pi 5 + KonstaKang image is just what this project happens to use.
+
 ## Status
 
 Early. Implemented so far:
@@ -42,6 +53,14 @@ Standard Gradle Android project.
 ```
 ./gradlew assembleDebug
 ```
+
+## Installing
+
+No release APK yet — this only gets through the TLS handshake so far, not
+useful as an installable app on its own. Once it can actually drive a session
+(service discovery + video working), a built APK and plain install
+instructions (`adb install`, or sideloading via USB storage/file manager on
+the device) will be added here.
 
 ## License
 
