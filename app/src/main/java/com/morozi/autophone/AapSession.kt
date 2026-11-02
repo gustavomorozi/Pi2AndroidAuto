@@ -69,26 +69,39 @@ class AapSession(
         }
     }
 
+    /**
+     * We are the phone: the CAR sends VERSION_REQUEST first and waits for our
+     * VERSION_RESPONSE -- confirmed empirically (our first attempt had both
+     * sides write a request and deadlock waiting for a response; Open Headunit's
+     * own log on that attempt said it "accepted the connection and then sent
+     * nothing", i.e. it was the one waiting on *us*). We never write first here.
+     */
     private fun performVersionHandshake() {
-        val request = ByteBuffer.allocate(6)
-            .putShort(ControlMessage.VERSION_REQUEST.toShort())
-            .putShort(1) // major version we ask for
-            .putShort(0) // minor version we ask for
-            .array()
-        writer.writeFrame(AapFrame(CONTROL_CHANNEL, AapFrame.FLAG_CONTROL, request))
-        Log.i(TAG, "Sent VERSION_REQUEST 1.0")
-
         val frame = reader.readFrame()
         require(frame.channelId == CONTROL_CHANNEL) { "Expected control channel, got ${frame.channelId}" }
+        Log.i(TAG, "First control frame: flags=0x${frame.flags.toString(16)} bytes=${frame.payload.toHex()}")
+
         val buf = ByteBuffer.wrap(frame.payload)
-        val messageId = buf.short.toInt() and 0xFFFF
-        require(messageId == ControlMessage.VERSION_RESPONSE) { "Expected VERSION_RESPONSE, got $messageId" }
+        val requestId = buf.short.toInt() and 0xFFFF
         val major = buf.short
         val minor = buf.short
-        val status = buf.short.toInt() and 0xFFFF
-        require(status == VERSION_STATUS_SUCCESS) { "Car rejected our version (status=$status)" }
-        Log.i(TAG, "Car accepted version $major.$minor")
+        Log.i(TAG, "Read as VERSION_REQUEST: messageId=$requestId major=$major minor=$minor")
+
+        // Response id: unconfirmed guess (request id + 1, a common pairing
+        // convention) -- the next test run's log will tell us if this is wrong,
+        // same way the request's real id (3, not our earlier guess of 1) did.
+        val responseId = requestId + 1
+        val response = ByteBuffer.allocate(8)
+            .putShort(responseId.toShort())
+            .putShort(major)
+            .putShort(minor)
+            .putShort(VERSION_STATUS_SUCCESS.toShort())
+            .array()
+        writer.writeFrame(AapFrame(CONTROL_CHANNEL, AapFrame.FLAG_CONTROL, response))
+        Log.i(TAG, "Sent VERSION_RESPONSE (messageId=$responseId) echoing $major.$minor, status=SUCCESS")
     }
+
+    private fun ByteArray.toHex(): String = joinToString(" ") { "%02x".format(it) }
 
     private fun performTlsHandshake() {
         val engine = TlsChannel.defaultEngine(isClient = true)
