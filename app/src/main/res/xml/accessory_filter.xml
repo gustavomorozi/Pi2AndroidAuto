@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Strings a car head unit uses to identify an Android Auto-capable USB accessory.
+  This is the public AOA identification convention (documented across the Android
+  Auto wired-protocol ecosystem), not anything specific to a particular product.
+-->
+<resources>
+    <usb-accessory manufacturer="Android" model="Android Auto" />
+</resources>
