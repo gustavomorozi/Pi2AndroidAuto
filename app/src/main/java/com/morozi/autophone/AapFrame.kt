@@ -47,16 +47,16 @@ class AapFrameReader(rawInput: InputStream) {
     fun readFrame(): AapFrame {
         val channelId = input.readUnsignedByte()
         val flags = input.readUnsignedByte()
-        val shortLength = input.readUnsignedShort()
+        val length = input.readUnsignedShort()
 
-        // Messages too large for a 16-bit length arrive as a short length of
-        // 0xFFFF followed by a real 32-bit length -- this mirrors how every
-        // independent implementation handles oversized (e.g. video) frames.
-        val length = if (shortLength == 0xFFFF) input.readInt() else shortLength
+        // The first frame of a message split over several frames carries the
+        // whole message's size as an extra 32-bit field after the frame length.
+        val frame = AapFrame(channelId, flags, ByteArray(0))
+        if (frame.isFirstChunk && !frame.isLastChunk) input.readInt()
 
         val payload = ByteArray(length)
         input.readFully(payload)
-        return AapFrame(channelId, flags, payload)
+        return frame.copy(payload = payload)
     }
 }
 
@@ -64,16 +64,17 @@ class AapFrameReader(rawInput: InputStream) {
 class AapFrameWriter(rawOutput: OutputStream) {
     private val output = DataOutputStream(rawOutput)
 
+    /**
+     * [totalSize] is required on the first frame of a message split over
+     * several frames, and ignored otherwise.
+     */
     @Synchronized
-    fun writeFrame(frame: AapFrame) {
+    fun writeFrame(frame: AapFrame, totalSize: Int = 0) {
+        require(frame.payload.size <= 0xFFFF) { "Frame payload too large: ${frame.payload.size}" }
         output.writeByte(frame.channelId)
         output.writeByte(frame.flags)
-        if (frame.payload.size < 0xFFFF) {
-            output.writeShort(frame.payload.size)
-        } else {
-            output.writeShort(0xFFFF)
-            output.writeInt(frame.payload.size)
-        }
+        output.writeShort(frame.payload.size)
+        if (frame.isFirstChunk && !frame.isLastChunk) output.writeInt(totalSize)
         output.write(frame.payload)
         output.flush()
     }

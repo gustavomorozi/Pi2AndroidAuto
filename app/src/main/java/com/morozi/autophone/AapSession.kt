@@ -22,24 +22,43 @@ private object ControlMessage {
     const val SSL_HANDSHAKE = 0x0003
     const val AUTH_COMPLETE = 0x0004
     const val SERVICE_DISCOVERY_REQUEST = 0x0005
+    const val SERVICE_DISCOVERY_RESPONSE = 0x0006 // confirmed: the car's reply
+    // Below: not yet seen on the wire; the car's reaction will confirm them.
+    const val CHANNEL_OPEN_REQUEST = 0x0007
+    const val CHANNEL_OPEN_RESPONSE = 0x0008
+    const val PING_REQUEST = 0x000b
+    const val PING_RESPONSE = 0x000c
+}
+
+/** Message ids on a media channel (video here). Not yet seen on the wire. */
+private object MediaMessage {
+    const val DATA = 0x0000 // 8-byte timestamp (us) + one encoded frame
+    const val CODEC_CONFIG = 0x0001 // SPS/PPS, no timestamp
+    const val SETUP = 0x8000
+    const val START = 0x8001
+    const val CONFIG = 0x8003
+    const val ACK = 0x8004
+    const val VIDEO_FOCUS_INDICATION = 0x8008
 }
 
 private const val VERSION_STATUS_SUCCESS = 0x0000
 
-/** How many post-TLS messages [AapSession.observeAfterTls] logs before giving up. */
-private const val OBSERVE_MESSAGE_LIMIT = 10
+/** Codec value the car listed for its video sink (captured: 3). */
+private const val VIDEO_CODEC_H264 = 3L
+private const val VIDEO_FOCUS_PROJECTED = 1L
+
+/** Keeps each frame's TLS record under the 16 KiB record limit. */
+private const val MAX_FRAME_PLAINTEXT = 16000
 
 /**
  * Drives one Android Auto session over an already-open USB accessory stream
  * pair, playing the "phone" role: the car sends the version request and opens
  * TLS as the client; we answer the version request and are the TLS server.
  *
- * Current state: version handshake and TLS handshake are implemented and were
- * never run end-to-end against a real head unit yet -- the next concrete step
- * is to test this against our own Open Headunit (acting as the car) over a
- * USB-C cable, since we already know that side works. Everything after the
- * TLS handshake (service discovery, channel setup, video/audio streaming) is
- * intentionally not written yet; see the TODO at the bottom of [run].
+ * Current state, tested against our own Open Headunit over Wi-Fi: version,
+ * TLS, AUTH_COMPLETE and service discovery work. Opening the video channel and
+ * streaming our generated picture is written but not yet confirmed; audio and
+ * input are not written.
  */
 class AapSession(
     rawInput: InputStream,
@@ -58,17 +77,13 @@ class AapSession(
 
             readAuthComplete()
             sendServiceDiscoveryRequest(tls)
-            observeEncrypted(tls)
-            // TODO next steps, in order:
-            //   1. Send AUTH_COMPLETE on the control channel once TLS is up.
-            //   2. Send our ServiceDiscoveryResponse advertising a video sink... no --
-            //      we are the phone, so WE send a request and the car responds with
-            //      which services (video, audio, input, sensors) it wants from us.
-            //   3. Open a video channel, start a MediaCodec H.264 encoder, and feed it
-            //      whatever content we decide to show (this is the actual point of the
-            //      whole project -- generated content, not a mirrored phone screen).
-            //   4. Handle input-channel touch/button events coming back from the car.
-            onEnded("not-yet-implemented: stopped after TLS handshake")
+            val videoChannel = readServiceDiscoveryResponse(tls)
+
+            openChannel(videoChannel, tls)
+            setUpVideo(videoChannel, tls)
+            streamVideo(videoChannel, tls)
+            // Still to do: audio and input channels, touch events from the car.
+            onEnded("video stream ended")
         } catch (t: Throwable) {
             Log.e(TAG, "Session failed", t)
             onEnded("error: ${t.message}")
@@ -132,40 +147,149 @@ class AapSession(
             .string(4, "Morozi Auto Phone")
             .string(5, "Morozi")
             .toByteArray()
-        sendEncrypted(CONTROL_CHANNEL, ControlMessage.SERVICE_DISCOVERY_REQUEST, body, tls)
+        sendMessage(CONTROL_CHANNEL, ControlMessage.SERVICE_DISCOVERY_REQUEST, body, tls)
         Log.i(TAG, "Sent SERVICE_DISCOVERY_REQUEST (${body.size} byte body)")
     }
 
-    private fun sendEncrypted(channel: Int, messageId: Int, body: ByteArray, tls: TlsChannel) {
-        val plain = ByteBuffer.allocate(2 + body.size)
-            .putShort(messageId.toShort())
-            .put(body)
-            .array()
-        val flags = AapFrame.FLAG_UNFRAGMENTED or AapFrame.FLAG_ENCRYPTED
-        writer.writeFrame(AapFrame(channel, flags, tls.encrypt(plain)))
+    /**
+     * Captured reply (id 6): a list of field-1 entries, one per service, each
+     * with its channel id in field 1. The video entry is the one whose field 3
+     * (media sink) carries field 4 (video configurations); codec 3 there is
+     * H.264.
+     */
+    private fun readServiceDiscoveryResponse(tls: TlsChannel): Int {
+        val response = readUntil(CONTROL_CHANNEL, ControlMessage.SERVICE_DISCOVERY_RESPONSE, tls)
+        val services = ProtoReader(response).messages(1)
+        for (service in services) {
+            Log.i(TAG, "Service on channel ${service.varints(1).firstOrNull()}: fields ${service.fields().map { it.number }}")
+        }
+        val video = services.firstOrNull { service ->
+            service.messages(3).any { sink -> sink.messages(4).isNotEmpty() }
+        } ?: error("Car offered no video service")
+        val channel = video.varints(1).first().toInt()
+        val sink = video.messages(3).first()
+        val config = sink.messages(4).first()
+        Log.i(
+            TAG,
+            "Video on channel $channel: codec=${sink.varints(1)} resolution=${config.varints(1)} " +
+                "frameRate=${config.varints(2)} density=${config.varints(5)}"
+        )
+        return channel
+    }
+
+    /** Phone asks the car to open one service's channel; body: priority, channel id. */
+    private fun openChannel(channel: Int, tls: TlsChannel) {
+        val body = ProtoWriter().varint(1, 0).varint(2, channel.toLong()).toByteArray()
+        sendMessage(channel, ControlMessage.CHANNEL_OPEN_REQUEST, body, tls, control = true)
+        Log.i(TAG, "Sent CHANNEL_OPEN_REQUEST for channel $channel")
+        val response = readUntil(channel, ControlMessage.CHANNEL_OPEN_RESPONSE, tls)
+        Log.i(TAG, "CHANNEL_OPEN_RESPONSE on $channel: status=${ProtoReader(response).varints(1)}")
+    }
+
+    /** Media setup: we name the codec, the car answers with its config (status, window). */
+    private fun setUpVideo(channel: Int, tls: TlsChannel) {
+        sendMessage(channel, MediaMessage.SETUP, ProtoWriter().varint(1, VIDEO_CODEC_H264).toByteArray(), tls)
+        Log.i(TAG, "Sent media SETUP on channel $channel")
+        val config = ProtoReader(readUntil(channel, MediaMessage.CONFIG, tls))
+        Log.i(TAG, "Media CONFIG: status=${config.varints(1)} maxUnacked=${config.varints(2)} configs=${config.varints(3)}")
+
+        sendMessage(channel, MediaMessage.START, ProtoWriter().varint(1, 0).varint(2, 0).toByteArray(), tls)
+        sendMessage(
+            channel,
+            MediaMessage.VIDEO_FOCUS_INDICATION,
+            ProtoWriter().varint(1, VIDEO_FOCUS_PROJECTED).varint(2, 0).toByteArray(),
+            tls
+        )
+        Log.i(TAG, "Sent media START and VIDEO_FOCUS_INDICATION")
     }
 
     /**
-     * Temporary: log what the car answers (decrypted) instead of guessing, until
-     * the next phase is written. Ends when the car closes the connection.
+     * Streams our generated picture. A second thread keeps reading what the car
+     * sends meanwhile (acks, pings, focus requests) so nothing backs up.
      */
-    private fun observeEncrypted(tls: TlsChannel) {
-        repeat(OBSERVE_MESSAGE_LIMIT) {
-            val frame = reader.readFrame()
-            val plain = if (frame.isEncrypted) tls.decrypt(frame.payload) else frame.payload
-            if (plain.size < 2) {
-                Log.i(TAG, "Frame ch=${frame.channelId} flags=0x${frame.flags.toString(16)}: ${plain.size} plain bytes")
-                return@repeat
+    private fun streamVideo(channel: Int, tls: TlsChannel) {
+        val source = VideoSource(
+            width = 1280, height = 720, fps = 30,
+            onCodecConfig = { sps -> sendMessage(channel, MediaMessage.CODEC_CONFIG, sps, tls) },
+            onFrame = { timestampUs, data ->
+                val body = ByteBuffer.allocate(8 + data.size).putLong(timestampUs).put(data).array()
+                sendMessage(channel, MediaMessage.DATA, body, tls)
             }
-            val messageId = ((plain[0].toInt() and 0xFF) shl 8) or (plain[1].toInt() and 0xFF)
-            Log.i(
-                TAG,
-                "Frame ch=${frame.channelId} flags=0x${frame.flags.toString(16)} id=$messageId " +
-                    "${plain.size - 2} byte body"
-            )
-            // Whole body, in pieces short enough for one logcat line each.
-            plain.drop(2).chunked(200).forEachIndexed { i, piece ->
-                Log.i(TAG, "  body[$i]: ${piece.toByteArray().toHex()}")
+        )
+        val listener = Thread({
+            try {
+                while (running) handleIncoming(readMessage(tls), tls)
+            } catch (t: Throwable) {
+                Log.i(TAG, "Car side closed: ${t.message}")
+            } finally {
+                running = false
+                source.stop()
+            }
+        }, "aap-incoming")
+        listener.start()
+        source.run()
+        listener.interrupt()
+    }
+
+    private fun handleIncoming(message: AapMessage, tls: TlsChannel) {
+        when {
+            message.channel == CONTROL_CHANNEL && message.id == ControlMessage.PING_REQUEST -> {
+                // Echo the car's timestamp back.
+                val timestamp = ProtoReader(message.body).varints(1).firstOrNull() ?: 0
+                sendMessage(CONTROL_CHANNEL, ControlMessage.PING_RESPONSE, ProtoWriter().varint(1, timestamp).toByteArray(), tls)
+            }
+            message.id == MediaMessage.ACK -> Unit // flow control; not enforced yet
+            else -> Log.i(TAG, "In: ch=${message.channel} id=0x${message.id.toString(16)} ${message.body.size} bytes: ${message.body.take(32).toByteArray().toHex()}")
+        }
+    }
+
+    /** Reads messages until [id] arrives on [channel], logging and answering pings on the way. */
+    private fun readUntil(channel: Int, id: Int, tls: TlsChannel): ByteArray {
+        while (true) {
+            val message = readMessage(tls)
+            if (message.channel == channel && message.id == id) return message.body
+            handleIncoming(message, tls)
+        }
+    }
+
+    private class AapMessage(val channel: Int, val id: Int, val body: ByteArray)
+
+    /** Reads one whole message, reassembling it if it came in several frames. */
+    private fun readMessage(tls: TlsChannel): AapMessage {
+        val plain = java.io.ByteArrayOutputStream()
+        var channel: Int
+        do {
+            val frame = reader.readFrame()
+            channel = frame.channelId
+            plain.write(if (frame.isEncrypted) tls.decrypt(frame.payload) else frame.payload)
+        } while (!frame.isLastChunk)
+        val bytes = plain.toByteArray()
+        val id = ((bytes[0].toInt() and 0xFF) shl 8) or (bytes[1].toInt() and 0xFF)
+        return AapMessage(channel, id, bytes.copyOfRange(2, bytes.size))
+    }
+
+    /**
+     * Encrypts and sends one message, splitting it over several frames when it
+     * is bigger than [MAX_FRAME_PLAINTEXT]. Each frame is encrypted on its own.
+     */
+    private fun sendMessage(channel: Int, messageId: Int, body: ByteArray, tls: TlsChannel, control: Boolean = false) {
+        val plain = ByteBuffer.allocate(2 + body.size).putShort(messageId.toShort()).put(body).array()
+        val baseFlags = AapFrame.FLAG_ENCRYPTED or (if (control) AapFrame.FLAG_CONTROL else 0)
+        synchronized(writer) {
+            if (plain.size <= MAX_FRAME_PLAINTEXT) {
+                writer.writeFrame(AapFrame(channel, baseFlags or AapFrame.FLAG_UNFRAGMENTED, tls.encrypt(plain)))
+                return
+            }
+            var offset = 0
+            while (offset < plain.size) {
+                val end = minOf(offset + MAX_FRAME_PLAINTEXT, plain.size)
+                var flags = baseFlags
+                if (offset == 0) flags = flags or AapFrame.FLAG_FIRST_CHUNK
+                if (end == plain.size) flags = flags or AapFrame.FLAG_LAST_CHUNK
+                // Total size: plaintext length of the whole message (unconfirmed).
+                val cipher = tls.encrypt(plain.copyOfRange(offset, end))
+                writer.writeFrame(AapFrame(channel, flags, cipher), totalSize = plain.size)
+                offset = end
             }
         }
     }
