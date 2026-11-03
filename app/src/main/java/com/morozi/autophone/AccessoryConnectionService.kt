@@ -32,6 +32,10 @@ private const val DUPLICATE_START_WINDOW_MS = 1500L
 
 /** Room for what the car sends while the session is busy elsewhere. */
 private const val ACCESSORY_PIPE_BUFFER = 1 shl 20
+
+/** Reopen attempts after a link drop while the car still has us attached. */
+private const val MAX_REOPEN_ATTEMPTS = 3
+private const val REOPEN_DELAY_MS = 1500L
 private const val NOTIFICATION_CHANNEL_ID = "accessory_connection"
 private const val NOTIFICATION_ID = 1
 
@@ -48,6 +52,9 @@ class AccessoryConnectionService : Service() {
     @Volatile private var session: AapSession? = null
     private var lastOpenAt = 0L
     private var readerThread: Thread? = null
+    private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private var reopenAttempts = 0
+
     /** Where every USB reader delivers what it reads: the newest session's pipe. */
     @Volatile private var currentSink: java.io.PipedOutputStream? = null
 
@@ -71,6 +78,7 @@ class AccessoryConnectionService : Service() {
             return START_NOT_STICKY
         }
         lastOpenAt = now
+        reopenAttempts = 0  // a fresh attach from the car
         openAccessory(accessory)
         return START_NOT_STICKY
     }
@@ -145,7 +153,7 @@ class AccessoryConnectionService : Service() {
             // Only the current session may end the service; a replaced one just goes away.
             if (session === aapSession) {
                 closeCurrent()
-                stopSelf()
+                retryOrGiveUp(accessory)
             }
         }
         session = aapSession
@@ -171,6 +179,27 @@ class AccessoryConnectionService : Service() {
         val reader = readerThread
         readerThread = null
         if (reader != null && reader !== Thread.currentThread()) reader.join(READER_EXIT_WAIT_MS)
+    }
+
+    /**
+     * A link that drops while the car still has us attached usually comes back
+     * if we simply open the accessory again (an approach that works on real
+     * head units for other phone-side implementations). Try a few times; only
+     * then give up, which the Pi's morozi_aoawatch helper answers by taking us
+     * off the bus so the car starts over from a clean AOA switch.
+     */
+    private fun retryOrGiveUp(accessory: UsbAccessory) {
+        val usbManager = getSystemService(USB_SERVICE) as UsbManager
+        val stillAttached = usbManager.accessoryList?.any { it == accessory } == true
+        if (stillAttached && reopenAttempts < MAX_REOPEN_ATTEMPTS) {
+            reopenAttempts++
+            Log.i(TAG, "Link dropped but the accessory is still attached; reopening in ${REOPEN_DELAY_MS} ms (try $reopenAttempts/$MAX_REOPEN_ATTEMPTS)")
+            mainHandler.postDelayed({ if (session == null) openAccessory(accessory) }, REOPEN_DELAY_MS)
+        } else {
+            Log.i(TAG, "USB session gave up (attached=$stillAttached, tries=$reopenAttempts)")
+            reopenAttempts = 0
+            stopSelf()
+        }
     }
 
     override fun onDestroy() {

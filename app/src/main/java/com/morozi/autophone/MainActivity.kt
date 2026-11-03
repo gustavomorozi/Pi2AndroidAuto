@@ -49,6 +49,9 @@ class MainActivity : Activity() {
 
         handleIntent(intent)
         if (intent.action != UsbManager.ACTION_USB_ACCESSORY_ATTACHED) {
+            // Carlinkit's `forceStartAoa`: the car may already have switched us into
+            // accessory mode before this app started. Pick up any accessory already
+            // attached so we don't miss the session.
             attachToExistingAccessory()
         }
     }

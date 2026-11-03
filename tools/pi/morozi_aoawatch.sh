@@ -8,7 +8,8 @@
 #    redoes the switch from scratch. (TBox: off the bus in 0.4 s, back as a
 #    normal device after ~6 s. This Android build otherwise stays in accessory
 #    mode and the CPC200-CCPA loops on "Accessory handshake timeout".)
-# 2. Our session ends (car gone, link error) -> same drop, so the next car
+# 2. Our app gives up on the link (it first reopens the accessory up to 3
+#    times, as other phone-side implementations do) -> same drop, so the next car
 #    session starts from a clean switch (TBox: build_normal_android()). Not
 #    repeated for the session end our own drop causes.
 # 3. Optional (setprop debug.morozi.noadb 1): in accessory mode expose only
@@ -24,7 +25,7 @@ OFF_SECONDS=6
 QUIET_AFTER_DROP=20   # seconds during which session ends are ours
 
 starts() { logcat -d -s UsbDeviceManager 2>/dev/null | grep -c 'startAccessoryMode'; }
-ends() { logcat -d -s AccessoryConnection 2>/dev/null | grep -c 'Session ended'; }
+ends() { logcat -d -s AccessoryConnection 2>/dev/null | grep -c 'USB session gave up'; }
 in_accessory() { ls -l $G/configs/b.1/ 2>/dev/null | grep -c accessory; }
 
 drop() {

@@ -340,7 +340,7 @@ def ccpa_service_discovery_response():
             + pb_bytes(2, b"Morozi") + pb_bytes(3, b"Bench CCPA"))
 
 
-def run(seconds, version, switch_pid=None, pids=(0x2D00, 0x2D01), tcp=None, ccpa=False, dump_path=None):
+def run(seconds, version, switch_pid=None, pids=(0x2D00, 0x2D01), tcp=None, ccpa=False, dump_path=None, restart=False):
     dump = open(dump_path, "wb") if dump_path else None
     if tcp:
         host, port = tcp.split(":")
@@ -374,7 +374,29 @@ def run(seconds, version, switch_pid=None, pids=(0x2D00, 0x2D01), tcp=None, ccpa
     frames = 0
     end = time.time() + seconds
     next_ping = time.time() + 1
+    restart_at = time.time() + seconds / 2 if restart else None
     while time.time() < end:
+        if restart_at and time.time() >= restart_at:
+            # Start over in the same connection, as the CarlinKit CCPA does:
+            # a plain VERSION_REQUEST, wait for the plain answer, new TLS.
+            restart_at = None
+            log("RESTART: sending a new version request mid-session")
+            link.send_plain(CONTROL, VERSION_REQUEST, struct.pack(">HH", major, minor))
+            deadline = time.time() + 10
+            while time.time() < deadline:
+                m = link.read_message(1)
+                if m and m[0] == CONTROL and m[2] == VERSION_RESPONSE and not m[1] & FLAG_ENCRYPTED:
+                    log(f"RESTART: version response {m[3].hex()}")
+                    break
+            else:
+                log("RESULT: no version response after restart")
+                return 4
+            if not link.handshake(10, ccpa):
+                log("RESULT: TLS failed after restart")
+                return 5
+            link.send_plain(CONTROL, AUTH_COMPLETE, pb_varint(1, 0))
+            frames_before_restart, frames = frames, 0
+            continue
         if time.time() >= next_ping:
             # Keepalive: the CarlinKit firmware drops a link after 5 s without pings.
             link.send_enc(CONTROL, PING_REQUEST, pb_varint(1, int(time.time() * 1e6)))
@@ -434,6 +456,7 @@ if __name__ == "__main__":
     ap.add_argument("--tcp", help="host:port to reach the phone over TCP instead of USB")
     ap.add_argument("--ccpa", action="store_true", help="behave like the CarlinKit CPC200-CCPA")
     ap.add_argument("--dump", help="write the received H.264 video to this file")
+    ap.add_argument("--restart", action="store_true", help="halfway through, start the session over")
     a = ap.parse_args()
     pids = (int(a.pid, 16),) if a.pid else (0x2D00, 0x2D01)
-    sys.exit(run(a.seconds, a.version, int(a.switch, 16) if a.switch else None, pids, a.tcp, a.ccpa, a.dump))
+    sys.exit(run(a.seconds, a.version, int(a.switch, 16) if a.switch else None, pids, a.tcp, a.ccpa, a.dump, a.restart))
