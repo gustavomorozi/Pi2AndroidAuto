@@ -375,18 +375,24 @@ def run(seconds, version, switch_pid=None, pids=(0x2D00, 0x2D01), tcp=None, ccpa
     end = time.time() + seconds
     next_ping = time.time() + 1
     restart_at = time.time() + seconds / 2 if restart else None
+    taps = list(tap or [])
     tap_at = time.time() + seconds / 3
     while time.time() < end:
-        if tap and time.time() >= tap_at:
-            # A car touch on the input channel (1): down then up, the way the
-            # CCPA reports them (field 3 touch {pointer {x, y, id}, index, action}).
-            for action in (0, 1):
-                pointer = pb_bytes(1, pb_varint(1, tap[0]) + pb_varint(2, tap[1]) + pb_varint(3, 0))
-                touch = pointer + pb_varint(2, 0) + pb_varint(3, action)
+        if taps and time.time() >= tap_at:
+            # A car touch on the input channel (1), the way the CCPA reports
+            # them: field 3 touch {pointer {x, y, id}..., action index, action}.
+            # (fingers, x, y): one finger = down, up; two fingers = down,
+            # pointer down, pointer up, up (Android MotionEvent actions).
+            fingers, x, y = taps.pop(0)
+            def pointers(n):
+                return b"".join(pb_bytes(1, pb_varint(1, x + 40 * i) + pb_varint(2, y) + pb_varint(3, i)) for i in range(n))
+            steps = [(1, 0, 0), (1, 0, 1)] if fingers == 1 else [(1, 0, 0), (2, 1, 5), (2, 1, 6), (1, 0, 1)]
+            for n, index, action in steps:
+                touch = pointers(n) + pb_varint(2, index) + pb_varint(3, action)
                 link.send_enc(1, 0x8001, pb_varint(1, int(time.time() * 1e9)) + pb_bytes(3, touch))
                 time.sleep(0.08)
-            log(f"TAP sent at {tap}")
-            tap = None
+            log(f"TAP sent at ({x}, {y}) with {fingers} finger(s)")
+            tap_at = time.time() + 2
         if restart_at and time.time() >= restart_at:
             # Start over in the same connection, as the CarlinKit CCPA does:
             # a plain VERSION_REQUEST, wait for the plain answer, new TLS.
@@ -468,8 +474,9 @@ if __name__ == "__main__":
     ap.add_argument("--ccpa", action="store_true", help="behave like the CarlinKit CPC200-CCPA")
     ap.add_argument("--dump", help="write the received H.264 video to this file")
     ap.add_argument("--restart", action="store_true", help="halfway through, start the session over")
-    ap.add_argument("--tap", help="x,y in video coordinates: send one touch a third of the way through")
+    ap.add_argument("--tap", action="append", help="x,y in video coordinates: a touch a third of the way through; repeat for more, 2 s apart")
+    ap.add_argument("--tap2", action="append", help="x,y: like --tap but with two fingers (sent after the --tap ones)")
     a = ap.parse_args()
     pids = (int(a.pid, 16),) if a.pid else (0x2D00, 0x2D01)
-    tap = tuple(int(v) for v in a.tap.split(",")) if a.tap else None
+    tap = [(1, *map(int, t.split(","))) for t in a.tap or []] + [(2, *map(int, t.split(","))) for t in a.tap2 or []]
     sys.exit(run(a.seconds, a.version, int(a.switch, 16) if a.switch else None, pids, a.tcp, a.ccpa, a.dump, a.restart, tap))

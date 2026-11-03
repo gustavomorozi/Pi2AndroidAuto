@@ -3,6 +3,8 @@ package com.morozi.autophone.screen
 import android.accessibilityservice.AccessibilityService
 import android.graphics.Rect
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
@@ -25,14 +27,38 @@ private const val TAG = "TapAssist"
  */
 class TapAssistService : AccessibilityService() {
 
+    private val main = Handler(Looper.getMainLooper())
+    private var controls: CarControls? = null
+
     override fun onServiceConnected() {
+        controls = CarControls(this)
         instance = this
         Log.i(TAG, "connected")
     }
 
     override fun onDestroy() {
         if (instance === this) instance = null
+        controls?.hide()
         super.onDestroy()
+    }
+
+    /** Shows the floating button while the car shows the mirrored screen. */
+    fun setCarConnected(connected: Boolean) = main.post {
+        if (connected) controls?.show() else controls?.hide()
+        Log.i(TAG, "floating button ${if (connected) "shown" else "hidden"}")
+    }
+
+    /** True if screen pixel ([x], [y]) is on the floating button or its menu. */
+    fun onControls(x: Int, y: Int): Boolean {
+        val result = java.util.concurrent.FutureTask { controls?.contains(x, y) == true }
+        main.post(result)
+        return runCatching { result.get(500, java.util.concurrent.TimeUnit.MILLISECONDS) }.getOrDefault(false)
+    }
+
+    /** Two-finger tap from the car. */
+    fun back() {
+        Log.i(TAG, "two-finger tap -> back")
+        performGlobalAction(GLOBAL_ACTION_BACK)
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) = Unit

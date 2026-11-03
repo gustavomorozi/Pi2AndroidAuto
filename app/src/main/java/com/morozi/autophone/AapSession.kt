@@ -460,7 +460,11 @@ class AapSession(
         ) else null
         videoSource = source
         Log.i(TAG, if (client != null) "Video: mirrored Android TV screen" else "Video: test pattern (screen server not running)")
-        val stopVideo = { client?.stop(); source?.stop() }
+        if (client != null) com.morozi.autophone.screen.TapAssistService.instance?.setCarConnected(true)
+        val stopVideo = {
+            client?.stop(); source?.stop()
+            if (client != null) com.morozi.autophone.screen.TapAssistService.instance?.setCarConnected(false)
+        }
         val listener = Thread({
             try {
                 while (running) handleIncoming(readMessage(tls), tls)
@@ -511,7 +515,8 @@ class AapSession(
             Log.i(TAG, "Input event (not touch): ${body.toHex()}")
             return
         }
-        val pointer = touch.messages(1).firstOrNull()
+        val pointers = touch.messages(1)
+        val pointer = pointers.firstOrNull()
         val x = pointer?.varints(1)?.firstOrNull() ?: -1
         val y = pointer?.varints(2)?.firstOrNull() ?: -1
         val action = touch.varints(3).firstOrNull() ?: -1
@@ -524,7 +529,7 @@ class AapSession(
                 else -> com.morozi.autophone.screen.ScreenProtocol.ACTION_MOVE
             }
             screen.touch(mapped, x.toInt(), y.toInt())
-            trackTapForRemoteOnlyApps(action, x.toInt(), y.toInt())
+            trackTapForRemoteOnlyApps(action, x.toInt(), y.toInt(), pointers.size)
             return
         }
         if (action == TOUCH_ACTION_DOWN) {
@@ -537,14 +542,16 @@ class AapSession(
     private var tapDownX = 0
     private var tapDownY = 0
     private var tapDownAt = 0L
+    private var tapFingers = 0
 
     /**
      * TV launchers ignore real taps (they act on remote focus and OK). A short
      * tap that stayed in place is also handed to the accessibility helper,
      * which activates the item under it in those apps only.
      */
-    private fun trackTapForRemoteOnlyApps(action: Long, x: Int, y: Int) {
+    private fun trackTapForRemoteOnlyApps(action: Long, x: Int, y: Int, fingers: Int) {
         val now = android.os.SystemClock.uptimeMillis()
+        if (action == TOUCH_ACTION_DOWN) tapFingers = fingers else tapFingers = maxOf(tapFingers, fingers)
         when (action) {
             TOUCH_ACTION_DOWN -> { tapDownX = x; tapDownY = y; tapDownAt = now }
             TOUCH_ACTION_UP -> {
@@ -552,14 +559,21 @@ class AapSession(
                     kotlin.math.abs(x - tapDownX) < TAP_SLOP_PX && kotlin.math.abs(y - tapDownY) < TAP_SLOP_PX
                 val service = com.morozi.autophone.screen.TapAssistService.instance
                 val config = videoConfig
-                if (!isTap || service == null || config == null) return
+                if (service == null || config == null) return
+                // V3: a short two-finger tap anywhere is Back.
+                if (tapFingers >= 2 && now - tapDownAt < TAP_MAX_MS) {
+                    Thread({ service.back() }, "aap-two-finger-back").start()
+                    return
+                }
+                if (!isTap) return
                 val metrics = android.content.res.Resources.getSystem().displayMetrics
                 val fit = com.morozi.autophone.screen.ScreenFit.of(
                     maxOf(metrics.widthPixels, metrics.heightPixels), minOf(metrics.widthPixels, metrics.heightPixels),
                     config.width, config.height
                 )
                 val (sx, sy) = fit.toScreen(tapDownX, tapDownY) ?: return
-                Thread({ service.tap(sx, sy) }, "aap-tap-assist").start()
+                // A tap on the floating button is the button's, not the app's below it.
+                Thread({ if (!service.onControls(sx, sy)) service.tap(sx, sy) }, "aap-tap-assist").start()
             }
         }
     }
