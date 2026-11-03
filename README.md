@@ -59,17 +59,27 @@ Ligue o Pi à rede e ative a depuração USB/ADB. Nos exemplos, o Pi está em
    ./gradlew assembleDebug
    ```
 
-2. **Instale o app**
+2. **Instale tudo com um comando** (app + arquivos de sistema, e reinicia o Pi).
+   No Windows, rode no Git Bash:
+
+   ```bash
+   tools/pi/install.sh 192.168.0.200
+   ```
+
+   O script instala o APK, copia os arquivos de `tools/pi` para o sistema do
+   Pi (`/system/etc/init`, `/system/bin`, `/system/usr/idc`), libera a rede
+   para o app (`restricted_networking_mode 0`) e reinicia o Pi. Sem endereço,
+   ele usa o aparelho que o `adb` já enxerga (USB ou rede).
+
+   No boot, o Pi liga sozinho o ADB por rede (porta 5555), o vigia do USB, o
+   servidor de tela (`morozi_screen`) e o serviço de acessibilidade que faz o
+   toque abrir itens nos apps feitos só para controle remoto.
+
+   <details><summary>Fazer à mão, sem o script</summary>
 
    ```bash
    adb connect 192.168.0.200:5555
    adb install -r app/build/outputs/apk/debug/app-debug.apk
-   ```
-
-3. **Instale os arquivos de sistema** (servidor de tela da V2, toque virtual,
-   ADB ligado a cada boot, vigia do USB):
-
-   ```bash
    adb root
    adb remount
    adb push tools/pi/morozi.rc /system/etc/init/morozi.rc
@@ -80,11 +90,9 @@ Ligue o Pi à rede e ative a depuração USB/ADB. Nos exemplos, o Pi está em
    adb reboot
    ```
 
-   No boot, o Pi liga sozinho o ADB por rede (porta 5555), o servidor de tela
-   (`morozi_screen`) e o serviço de acessibilidade que faz o toque abrir
-   itens nos apps feitos só para controle remoto.
+   </details>
 
-4. **Abra o app uma vez** (ícone "Pi2AndroidAuto" no launcher) para ele
+3. **Abra o app uma vez** (ícone "Pi2AndroidAuto" no launcher) para ele
    registrar o acessório USB.
 
 ### Usar no carro
@@ -190,17 +198,27 @@ Put the Pi on your network and turn on USB/ADB debugging. The examples use
    ./gradlew assembleDebug
    ```
 
-2. **Install the app**
+2. **Install everything with one command** (app + system files, then the Pi
+   reboots). On Windows, run it in Git Bash:
+
+   ```bash
+   tools/pi/install.sh 192.168.0.200
+   ```
+
+   The script installs the APK, copies the files from `tools/pi` into the
+   Pi's system (`/system/etc/init`, `/system/bin`, `/system/usr/idc`), lets the
+   app use the network (`restricted_networking_mode 0`) and reboots the Pi.
+   Without an address it uses the device `adb` already sees (USB or network).
+
+   At boot the Pi turns on ADB over the network (port 5555), the USB watcher,
+   the screen server (`morozi_screen`) and the accessibility service that lets
+   a tap open items in apps built for the remote only.
+
+   <details><summary>By hand, without the script</summary>
 
    ```bash
    adb connect 192.168.0.200:5555
    adb install -r app/build/outputs/apk/debug/app-debug.apk
-   ```
-
-3. **Install the system files** (V2 screen server, virtual touchscreen, ADB
-   on at every boot, USB watcher):
-
-   ```bash
    adb root
    adb remount
    adb push tools/pi/morozi.rc /system/etc/init/morozi.rc
@@ -211,11 +229,9 @@ Put the Pi on your network and turn on USB/ADB debugging. The examples use
    adb reboot
    ```
 
-   At boot the Pi turns on ADB over the network (port 5555), the screen
-   server (`morozi_screen`) and the accessibility service that lets a tap
-   open items in apps built for the remote only.
+   </details>
 
-4. **Open the app once** ("Pi2AndroidAuto" in the launcher) so it registers
+3. **Open the app once** ("Pi2AndroidAuto" in the launcher) so it registers
    the USB accessory.
 
 ### Use it in the car
