@@ -257,12 +257,21 @@ class Link:
             return ch, flags, mid, payload[2:]
 
     # TLS client handshake inside SSL_HANDSHAKE messages
-    def handshake(self, timeout_s):
+    def handshake(self, timeout_s, ccpa=False):
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
         ctx.minimum_version = ssl.TLSVersion.TLSv1_2
-        ctx.set_ciphers("ALL:@SECLEVEL=0")
+        if ccpa:
+            # What the CarlinKit CPC200-CCPA offered (captured ClientHello):
+            # TLS 1.2, plain RSA and DHE-RSA suites only, no ECDHE.
+            ctx.maximum_version = ssl.TLSVersion.TLSv1_2
+            ctx.set_ciphers("DHE-RSA-AES256-GCM-SHA384:DHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:"
+                            "DHE-RSA-AES256-SHA256:DHE-RSA-AES128-SHA256:DHE-RSA-AES256-SHA:DHE-RSA-AES128-SHA:"
+                            "AES256-GCM-SHA384:AES128-GCM-SHA256:AES256-SHA256:AES128-SHA256:AES256-SHA:AES128-SHA:"
+                            "@SECLEVEL=0")
+        else:
+            ctx.set_ciphers("ALL:@SECLEVEL=0")
         self.in_bio, self.out_bio = ssl.MemoryBIO(), ssl.MemoryBIO()
         self.tls = ctx.wrap_bio(self.in_bio, self.out_bio, server_side=False)
         deadline = time.time() + timeout_s
@@ -288,8 +297,54 @@ class Link:
             self.in_bio.write(payload[2:])
 
 
-def run(seconds, version, switch_pid=None, pids=(0x2D00, 0x2D01)):
-    if sys.platform == "win32":
+class TcpTransport:
+    """Same interface as Usb, over TCP (our app's listen mode, port 5277)."""
+
+    def __init__(self, host, port):
+        import socket
+        self.sock = socket.create_connection((host, port), timeout=5)
+        self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        log(f"connected to {host}:{port}")
+        self.buf = bytearray()
+
+    def write(self, data):
+        self.sock.sendall(data)
+
+    def read_some(self, timeout_ms):
+        import socket
+        self.sock.settimeout(max(timeout_ms, 1) / 1000)
+        try:
+            data = self.sock.recv(65536)
+        except socket.timeout:
+            return False
+        if not data:
+            raise SystemExit("phone closed the connection")
+        self.buf += data
+        return True
+
+    read_exact = Usb.read_exact
+
+
+def ccpa_service_discovery_response():
+    """Services as the CarlinKit CPC200-CCPA listed them to us (03:56 capture):
+    video ch3 800x480@30 (margins 0x12, density 120), touch input ch1,
+    48 kHz stereo media audio ch4."""
+    video = pb_varint(1, 3) + pb_bytes(3, pb_varint(1, 3) + pb_varint(2, 0) + pb_bytes(4,
+        pb_varint(1, 1) + pb_varint(2, 2) + pb_varint(3, 0) + pb_varint(4, 12) + pb_varint(5, 120)))
+    touch = pb_bytes(2, pb_varint(1, 800) + pb_varint(2, 480))
+    keys = b"".join(pb_varint(1, k) for k in (1, 2, 3, 4, 5, 19, 20, 21, 22, 23, 84, 85, 87, 88, 126, 127))
+    inp = pb_varint(1, 1) + pb_bytes(4, keys + touch)
+    audio = pb_varint(1, 4) + pb_bytes(3, pb_varint(1, 1) + pb_varint(2, 3) + pb_bytes(3,
+        pb_varint(1, 48000) + pb_varint(2, 16) + pb_varint(3, 2)))
+    return (pb_bytes(1, video) + pb_bytes(1, inp) + pb_bytes(1, audio)
+            + pb_bytes(2, b"Morozi") + pb_bytes(3, b"Bench CCPA"))
+
+
+def run(seconds, version, switch_pid=None, pids=(0x2D00, 0x2D01), tcp=None, ccpa=False):
+    if tcp:
+        host, port = tcp.split(":")
+        transport = TcpTransport(host, int(port))
+    elif sys.platform == "win32":
         if switch_pid and aoa_switch_windows(switch_pid):
             time.sleep(3)  # let the device drop off the bus and re-enumerate
         for _ in range(30):
@@ -310,7 +365,7 @@ def run(seconds, version, switch_pid=None, pids=(0x2D00, 0x2D01)):
         log("RESULT: no version response")
         return 2
     log(f"<- version response {m[3].hex()}")
-    if not link.handshake(10):
+    if not link.handshake(10, ccpa):
         log("RESULT: TLS failed")
         return 3
     link.send_plain(CONTROL, AUTH_COMPLETE, pb_varint(1, 0))
@@ -332,7 +387,7 @@ def run(seconds, version, switch_pid=None, pids=(0x2D00, 0x2D01)):
             video = pb_varint(1, VIDEO_CHANNEL) + pb_bytes(3, pb_varint(1, 3) + pb_varint(2, 0) + pb_bytes(4,
                 pb_varint(1, 1) + pb_varint(2, 2) + pb_varint(3, 0) + pb_varint(4, 0) + pb_varint(5, 160)))
             resp = pb_bytes(1, video) + pb_bytes(2, b"Morozi") + pb_bytes(3, b"Bench HU")
-            link.send_enc(CONTROL, SD_RESPONSE, resp)
+            link.send_enc(CONTROL, SD_RESPONSE, ccpa_service_discovery_response() if ccpa else resp)
         elif mid == CH_OPEN_REQUEST:
             log(f"<- CHANNEL_OPEN_REQUEST ch{ch} {body.hex()}")
             link.send_enc(ch, CH_OPEN_RESPONSE, pb_varint(1, 0), control=True)
@@ -344,13 +399,17 @@ def run(seconds, version, switch_pid=None, pids=(0x2D00, 0x2D01)):
             link.send_enc(CONTROL, AUDIO_FOCUS_RESPONSE, pb_varint(1, 1))
         elif mid == MEDIA_SETUP:
             log(f"<- MEDIA SETUP ch{ch} {body.hex()}")
-            link.send_enc(ch, MEDIA_CONFIG, pb_varint(1, 2) + pb_varint(2, 4) + pb_varint(3, 0))
+            max_unacked = 1 if ccpa and ch == VIDEO_CHANNEL else 4  # CCPA video: 1 (captured)
+            link.send_enc(ch, MEDIA_CONFIG, pb_varint(1, 2) + pb_varint(2, max_unacked) + pb_varint(3, 0))
             if ch == VIDEO_CHANNEL:
                 # The CarlinKit CPC200-CCPA sends this right after CONFIG
                 # (captured 03:56: ch3 0x8008 "08 01 10 01").
                 link.send_enc(ch, VIDEO_FOCUS_INDICATION, pb_varint(1, 1) + pb_varint(2, 1))
         elif mid == MEDIA_START:
             log(f"<- MEDIA START ch{ch} {body.hex()}")
+        elif ch == 1 and mid == 0x8002:  # key binding request on the input channel
+            log(f"<- KEY_BINDING_REQUEST {len(body)}B")
+            link.send_enc(ch, 0x8003, pb_varint(1, 0))
         elif mid in (MEDIA_DATA, MEDIA_CODEC_CONFIG):
             frames += 1
             link.send_enc(ch, MEDIA_ACK, pb_varint(1, 0) + pb_varint(2, 1))
@@ -368,6 +427,8 @@ if __name__ == "__main__":
     ap.add_argument("--version", default="1.1")
     ap.add_argument("--switch", help="Windows: normal-mode PID to switch first, e.g. 4ee7 for the Pi")
     ap.add_argument("--pid", help="accessory-mode PID to open (2d00 or 2d01); default tries both")
+    ap.add_argument("--tcp", help="host:port to reach the phone over TCP instead of USB")
+    ap.add_argument("--ccpa", action="store_true", help="behave like the CarlinKit CPC200-CCPA")
     a = ap.parse_args()
     pids = (int(a.pid, 16),) if a.pid else (0x2D00, 0x2D01)
-    sys.exit(run(a.seconds, a.version, int(a.switch, 16) if a.switch else None, pids))
+    sys.exit(run(a.seconds, a.version, int(a.switch, 16) if a.switch else None, pids, a.tcp, a.ccpa))

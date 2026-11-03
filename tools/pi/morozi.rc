@@ -14,3 +14,20 @@ on property:debug.morozi.usb=on
 
 on property:debug.morozi.usb=rebind
     start morozi_usbctl
+
+# Leave accessory mode when the car repeats the AOA start (see the script).
+# Turn off with: setprop debug.morozi.aoawatch 0
+service morozi_aoawatch /system/bin/sh /system/bin/morozi_aoawatch.sh
+    user root
+    group root
+    seclabel u:r:su:s0
+    disabled
+
+on property:sys.boot_completed=1
+    start morozi_aoawatch
+
+on property:debug.morozi.aoawatch=0
+    stop morozi_aoawatch
+
+on property:debug.morozi.aoawatch=1
+    start morozi_aoawatch
