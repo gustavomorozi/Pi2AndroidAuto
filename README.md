@@ -67,13 +67,15 @@ Ligue o Pi à rede e ative a depuração USB/ADB. Nos exemplos, o Pi está em
    ```
 
    O script instala o APK, copia os arquivos de `tools/pi` para o sistema do
-   Pi (`/system/etc/init`, `/system/bin`, `/system/usr/idc`), libera a rede
+   Pi (`/system/etc/init`, `/system/bin`), libera a rede
    para o app (`restricted_networking_mode 0`) e reinicia o Pi. Sem endereço,
    ele usa o aparelho que o `adb` já enxerga (USB ou rede).
 
-   No boot, o Pi liga sozinho o ADB por rede (porta 5555), o vigia do USB, o
-   servidor de tela (`morozi_screen`) e o serviço de acessibilidade que faz o
-   toque abrir itens nos apps feitos só para controle remoto.
+   No boot, o Pi liga sozinho o ADB por rede (porta 5555) e o vigia do USB. Na
+   branch `v2` o mesmo script instala também o servidor de tela
+   (`morozi_screen`) e o toque virtual, e o boot liga o serviço de
+   acessibilidade que faz o toque abrir itens nos apps feitos só para
+   controle remoto.
 
    <details><summary>Fazer à mão, sem o script</summary>
 
@@ -83,8 +85,7 @@ Ligue o Pi à rede e ative a depuração USB/ADB. Nos exemplos, o Pi está em
    adb root
    adb remount
    adb push tools/pi/morozi.rc /system/etc/init/morozi.rc
-   adb push tools/pi/morozi_adbon.sh tools/pi/morozi_aoawatch.sh tools/pi/morozi_screen.sh tools/pi/morozi_usbctl.sh /system/bin/
-   adb push tools/pi/Vendor_18d1_Product_7a01.idc /system/usr/idc/
+   adb push tools/pi/morozi_adbon.sh tools/pi/morozi_aoawatch.sh tools/pi/morozi_usbctl.sh /system/bin/
    adb shell chmod 755 /system/bin/morozi_*.sh
    adb shell settings put global restricted_networking_mode 0
    adb reboot
@@ -206,13 +207,15 @@ Put the Pi on your network and turn on USB/ADB debugging. The examples use
    ```
 
    The script installs the APK, copies the files from `tools/pi` into the
-   Pi's system (`/system/etc/init`, `/system/bin`, `/system/usr/idc`), lets the
+   Pi's system (`/system/etc/init`, `/system/bin`), lets the
    app use the network (`restricted_networking_mode 0`) and reboots the Pi.
    Without an address it uses the device `adb` already sees (USB or network).
 
-   At boot the Pi turns on ADB over the network (port 5555), the USB watcher,
-   the screen server (`morozi_screen`) and the accessibility service that lets
-   a tap open items in apps built for the remote only.
+   At boot the Pi turns on ADB over the network (port 5555) and the USB
+   watcher. On the `v2` branch the same script also installs the screen server
+   (`morozi_screen`) and the virtual touchscreen, and boot starts the
+   accessibility service that lets a tap open items in apps built for the
+   remote only.
 
    <details><summary>By hand, without the script</summary>
 
@@ -222,8 +225,7 @@ Put the Pi on your network and turn on USB/ADB debugging. The examples use
    adb root
    adb remount
    adb push tools/pi/morozi.rc /system/etc/init/morozi.rc
-   adb push tools/pi/morozi_adbon.sh tools/pi/morozi_aoawatch.sh tools/pi/morozi_screen.sh tools/pi/morozi_usbctl.sh /system/bin/
-   adb push tools/pi/Vendor_18d1_Product_7a01.idc /system/usr/idc/
+   adb push tools/pi/morozi_adbon.sh tools/pi/morozi_aoawatch.sh tools/pi/morozi_usbctl.sh /system/bin/
    adb shell chmod 755 /system/bin/morozi_*.sh
    adb shell settings put global restricted_networking_mode 0
    adb reboot
