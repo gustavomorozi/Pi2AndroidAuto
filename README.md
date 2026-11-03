@@ -30,6 +30,7 @@ Projetos abertos que já existiam fazem o outro lado, o do carro (head unit).
 |---|---|---|
 | **V1** (tag `v1.0`, branch `master`) | Sessão Android Auto completa por USB, tela de teste gerada, toque, 30 fps | **No carro** (Fiat Argo + CPC200-CCPA) |
 | **V2** (branch `v2`) | Espelha a tela real do Android TV, injeta os toques do carro, abre itens do launcher da TV com um toque | Banco de testes (carro simulado no PC); falta o carro |
+| **V3** (branch `v3`) | Botão flutuante arrastável (Voltar, Início, Abas recentes) que some após 5 s sem toque; toque com 2 dedos = Voltar | Banco de testes |
 
 Ainda não tem: áudio de mídia, microfone, sensores e sessão por Wi‑Fi no carro.
 É um projeto em fase inicial.
@@ -178,6 +179,7 @@ unit).
 |---|---|---|
 | **V1** (tag `v1.0`, branch `master`) | Full Android Auto session over USB, generated test screen, touch, 30 fps | **In a car** (Fiat Argo + CPC200-CCPA) |
 | **V2** (branch `v2`) | Mirrors the real Android TV screen, injects the car's touches, opens TV launcher items with a tap | Test bench (simulated car on a PC); not yet in a car |
+| **V3** (branch `v3`) | Draggable floating button (Back, Home, recent apps) that hides after 5 s without a touch; two-finger tap = Back | Test bench |
 
 Not done yet: media audio, microphone, sensors, and a Wi‑Fi session in the
 car. This is an early-stage project.

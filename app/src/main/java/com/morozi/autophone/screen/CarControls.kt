@@ -60,6 +60,7 @@ class CarControls(private val service: AccessibilityService) {
         active = false
         main.removeCallbacks(idle)
         closeMenu()
+        closeTabs()
         button?.let { windows.removeView(it) }
         button = null
     }
@@ -89,7 +90,7 @@ class CarControls(private val service: AccessibilityService) {
 
     /** True if screen pixel ([x], [y]) is on the button or its open menu. */
     fun contains(x: Int, y: Int): Boolean =
-        listOfNotNull(button, menu).any { view ->
+        listOfNotNull(button, menu, tabs).any { view ->
             val at = IntArray(2).also { view.getLocationOnScreen(it) }
             Rect(at[0], at[1], at[0] + view.width, at[1] + view.height).contains(x, y)
         }
@@ -110,9 +111,11 @@ class CarControls(private val service: AccessibilityService) {
                 setColor(PANEL)
                 setStroke(3, OUTLINE)
             }
-            addView(item("←", "Voltar", AccessibilityService.GLOBAL_ACTION_BACK))
-            addView(item("⌂", "Início", AccessibilityService.GLOBAL_ACTION_HOME))
-            addView(item("❐", "Abas", AccessibilityService.GLOBAL_ACTION_RECENTS))
+            addView(item("←", "Voltar") { service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK) })
+            addView(item("⌂", "Início") { service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME) })
+            // Android TV has no recents screen (GLOBAL_ACTION_RECENTS does
+            // nothing there), so Abas is our own panel of recent apps.
+            addView(item("❐", "Abas") { openTabs() })
         }
         // Open toward the middle of the screen: right of the button on the left
         // half, left of it on the right half (END gravity counts from the right).
@@ -131,7 +134,7 @@ class CarControls(private val service: AccessibilityService) {
         menu = bar
     }
 
-    private fun item(icon: String, label: String, action: Int) = LinearLayout(service).apply {
+    private fun item(icon: String, label: String, action: () -> Unit) = LinearLayout(service).apply {
         orientation = LinearLayout.VERTICAL
         gravity = Gravity.CENTER
         setPadding(gap, 0, gap, 0)
@@ -139,8 +142,69 @@ class CarControls(private val service: AccessibilityService) {
         addView(text(label, buttonSize * 0.17f))
         setOnClickListener {
             closeMenu()
-            service.performGlobalAction(action)
+            action()
         }
+    }
+
+    private var tabs: View? = null
+
+    private fun closeTabs() {
+        tabs?.let { windows.removeView(it) }
+        tabs = null
+    }
+
+    /** A panel in the middle of the screen with the most recently used apps; tap one to open it. */
+    private fun openTabs() {
+        closeTabs()
+        val apps = RecentApps.list(service, TAB_COUNT)
+        val iconSize = buttonSize * 7 / 10
+        val panel = LinearLayout(service).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            setPadding(gap * 2, gap, gap * 2, gap)
+            background = GradientDrawable().apply {
+                cornerRadius = gap * 2f
+                setColor(PANEL)
+                setStroke(3, OUTLINE)
+            }
+            val header = LinearLayout(service).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                addView(text("Abas recentes", buttonSize * 0.22f), LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+                addView(text("✕", buttonSize * 0.3f).apply {
+                    setPadding(gap, 0, 0, 0)
+                    setOnClickListener { closeTabs() }
+                })
+            }
+            addView(header, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+            if (apps.isEmpty()) addView(text("Nenhum app recente", buttonSize * 0.2f).apply { setPadding(0, gap, 0, gap) })
+            apps.chunked(TAB_COLUMNS).forEach { rowApps ->
+                addView(LinearLayout(service).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    rowApps.forEach { app ->
+                        addView(LinearLayout(service).apply {
+                            orientation = LinearLayout.VERTICAL
+                            gravity = Gravity.CENTER_HORIZONTAL
+                            setPadding(gap, gap, gap, 0)
+                            addView(android.widget.ImageView(service).apply { setImageDrawable(app.icon) },
+                                LinearLayout.LayoutParams(iconSize, iconSize))
+                            addView(text(app.label, buttonSize * 0.15f).apply {
+                                maxLines = 1
+                                ellipsize = android.text.TextUtils.TruncateAt.END
+                                width = iconSize * 3 / 2
+                            })
+                            setOnClickListener {
+                                closeTabs()
+                                runCatching { service.startActivity(app.intent) }
+                                    .onFailure { android.util.Log.w("TapAssist", "could not open ${app.label}", it) }
+                            }
+                        })
+                    }
+                })
+            }
+        }
+        windows.addView(panel, overlayParams().apply { gravity = Gravity.CENTER })
+        tabs = panel
     }
 
     private fun text(value: String, sizePx: Float) = TextView(service).apply {
@@ -211,6 +275,8 @@ class CarControls(private val service: AccessibilityService) {
 
     private companion object {
         const val IDLE_MS = 5_000L
+        const val TAB_COUNT = 8
+        const val TAB_COLUMNS = 4
         const val ANIM_MS = 250L
         val PANEL = Color.argb(215, 27, 35, 43)
         val OUTLINE = Color.argb(200, 61, 220, 132)

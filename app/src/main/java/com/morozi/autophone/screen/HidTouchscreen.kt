@@ -16,7 +16,7 @@ private const val TAG = "HidTouchscreen"
  * One contact (tap, drag, scroll). Coordinates are sent in 0..[MAX] and Android
  * maps that range onto the main display.
  */
-internal class HidTouchscreen private constructor(private val uhid: FileOutputStream) {
+internal class HidTouchscreen private constructor(private var uhid: FileOutputStream) {
 
     @Synchronized
     fun down(x: Int, y: Int, screenWidth: Int, screenHeight: Int) {
@@ -26,6 +26,18 @@ internal class HidTouchscreen private constructor(private val uhid: FileOutputSt
     @Synchronized
     fun up() {
         report(false, lastX, lastY)
+    }
+
+    /**
+     * Drops the touch in progress without a tap: the device is removed and made
+     * again, and Android cancels the gesture of a device that went away
+     * (ACTION_CANCEL), so the app under the finger does not click.
+     */
+    @Synchronized
+    fun cancel() {
+        runCatching { uhid.close() }
+        uhid = open()
+        Log.i(TAG, "touch cancelled (device recreated)")
     }
 
     private var lastX = 0
@@ -80,7 +92,9 @@ internal class HidTouchscreen private constructor(private val uhid: FileOutputSt
             0xC0.toByte()                 // End Collection
         )
 
-        fun create(): HidTouchscreen {
+        fun create(): HidTouchscreen = HidTouchscreen(open())
+
+        private fun open(): FileOutputStream {
             val out = FileOutputStream("/dev/uhid")
             // UHID_CREATE2: u32 type, name[128], phys[64], uniq[64], u16 rd_size,
             // u16 bus, u32 vendor, u32 product, u32 version, u32 country, rd_data[4096]
@@ -95,7 +109,7 @@ internal class HidTouchscreen private constructor(private val uhid: FileOutputSt
             event.put(DESCRIPTOR)
             out.write(event.array())
             Log.i(TAG, "virtual touchscreen created")
-            return HidTouchscreen(out)
+            return out
         }
 
         private fun fixed(text: String, size: Int): ByteArray = text.toByteArray().copyOf(size)

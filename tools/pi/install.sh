@@ -77,6 +77,8 @@ if [ -f "$apk" ]; then
         exit 1
     fi
     app_updated=1
+    # V3: lets the floating button's "Abas" panel order apps by recent use.
+    a shell appops set com.morozi.autophone GET_USAGE_STATS allow || true
 else
     echo "    no APK at $apk; run without --no-build to build it"
     app_updated=0
@@ -89,12 +91,16 @@ if [ "$carlink" = 1 ] && a shell pm path "$carlink_pkg" >/dev/null 2>&1 && [ "$u
 elif [ "$carlink" = 1 ]; then
     step "Installing CarLink (latest release)"
     dl="$(mktemp -d)"
-    url="$(curl -fsSL https://api.github.com/repos/F-e-n-y-x/CarLink/releases/latest | grep -o 'https://[^"]*.apk' | head -1)" || url=""
+    # Saved to a file first: piping curl into head can cut it off mid-write.
+    url=""
+    if curl -fsSL --retry 3 -o "$(local_path "$dl/release.json")" https://api.github.com/repos/F-e-n-y-x/CarLink/releases/latest; then
+        url="$(grep -o 'https://[^"]*\.apk"' "$dl/release.json" | head -1 | tr -d '"')" || url=""
+    fi
     if [ -z "$url" ]; then
         echo "    could not find the CarLink APK in the latest release; skipped"
     else
         name="$(basename "$url")"
-        if curl -fsSL -o "$dl/$name" "$url" && curl -fsSL -o "$dl/$name.sha256" "$url.sha256" \
+        if curl -fsSL --retry 3 -o "$(local_path "$dl/$name")" "$url" && curl -fsSL --retry 3 -o "$(local_path "$dl/$name.sha256")" "$url.sha256" \
             && (cd "$dl" && sha256sum -c "$name.sha256" >/dev/null); then
             a install -r "$(local_path "$dl/$name")" || echo "    CarLink not installed (a newer one may be there); skipped"
         else

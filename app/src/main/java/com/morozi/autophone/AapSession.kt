@@ -58,6 +58,7 @@ private const val VIDEO_FOCUS_PROJECTED = 1L
 private const val AUDIO_FOCUS_GAIN = 1L
 private const val TOUCH_ACTION_DOWN = 0L
 private const val TOUCH_ACTION_UP = 1L
+private const val TOUCH_ACTION_POINTER_DOWN = 5L
 
 /** A tap: released within this time, moved less than this (video pixels). */
 private const val TAP_MAX_MS = 600L
@@ -528,7 +529,14 @@ class AapSession(
                 TOUCH_ACTION_UP -> com.morozi.autophone.screen.ScreenProtocol.ACTION_UP
                 else -> com.morozi.autophone.screen.ScreenProtocol.ACTION_MOVE
             }
-            screen.touch(mapped, x.toInt(), y.toInt())
+            // V3: a second finger cancels the first finger's touch (so the app
+            // does not click under it); the rest of that gesture is not sent.
+            if (action == TOUCH_ACTION_DOWN) gestureCancelled = false
+            if (!gestureCancelled && (pointers.size >= 2 || action == TOUCH_ACTION_POINTER_DOWN)) {
+                gestureCancelled = true
+                screen.touch(com.morozi.autophone.screen.ScreenProtocol.ACTION_CANCEL, x.toInt(), y.toInt())
+            }
+            if (!gestureCancelled) screen.touch(mapped, x.toInt(), y.toInt())
             trackTapForRemoteOnlyApps(action, x.toInt(), y.toInt(), pointers.size)
             return
         }
@@ -543,6 +551,7 @@ class AapSession(
     private var tapDownY = 0
     private var tapDownAt = 0L
     private var tapFingers = 0
+    private var gestureCancelled = false
 
     /**
      * TV launchers ignore real taps (they act on remote focus and OK). A short

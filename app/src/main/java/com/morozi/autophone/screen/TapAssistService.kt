@@ -60,8 +60,12 @@ class TapAssistService : AccessibilityService() {
 
     /** Two-finger tap from the car. */
     fun back() {
-        Log.i(TAG, "two-finger tap -> back")
-        performGlobalAction(GLOBAL_ACTION_BACK)
+        // On the main thread, a moment after the cancelled touch settles (the
+        // touchscreen was just recreated); sent at once it was lost.
+        main.postDelayed({
+            val done = performGlobalAction(GLOBAL_ACTION_BACK)
+            Log.i(TAG, "two-finger tap -> back ($done)")
+        }, BACK_DELAY_MS)
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) = Unit
@@ -107,6 +111,8 @@ class TapAssistService : AccessibilityService() {
     }
 
     companion object {
+        private const val BACK_DELAY_MS = 300L
+
         @Volatile var instance: TapAssistService? = null
             private set
 

@@ -118,6 +118,7 @@ object ScreenServer {
                             val (sx, sy) = fit.toScreen(x, y) ?: continue
                             when (action) {
                                 ScreenProtocol.ACTION_UP -> touch?.up()
+                                ScreenProtocol.ACTION_CANCEL -> touch?.cancel()
                                 else -> touch?.down(sx, sy, screen.first, screen.second)
                             }
                         }

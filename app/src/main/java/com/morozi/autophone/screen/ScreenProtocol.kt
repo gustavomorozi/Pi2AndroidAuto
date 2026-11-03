@@ -21,4 +21,6 @@ object ScreenProtocol {
     const val ACTION_DOWN = 0
     const val ACTION_UP = 1
     const val ACTION_MOVE = 2
+    /** Second finger: drop the touch so the app does not get a tap. */
+    const val ACTION_CANCEL = 3
 }
