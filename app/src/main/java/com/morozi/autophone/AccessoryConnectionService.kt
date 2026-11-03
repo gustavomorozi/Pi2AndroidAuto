@@ -48,6 +48,8 @@ class AccessoryConnectionService : Service() {
     @Volatile private var session: AapSession? = null
     private var lastOpenAt = 0L
     private var readerThread: Thread? = null
+    /** Where every USB reader delivers what it reads: the newest session's pipe. */
+    @Volatile private var currentSink: java.io.PipedOutputStream? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -97,6 +99,7 @@ class AccessoryConnectionService : Service() {
         val raw = RawLogInputStream(FileInputStream(fd.fileDescriptor))
         val pipeIn = java.io.PipedInputStream(ACCESSORY_PIPE_BUFFER)
         val pipeOut = java.io.PipedOutputStream(pipeIn)
+        currentSink = pipeOut
         readerThread = thread(name = "aap-usb-reader") {
             val buffer = ByteArray(ACCESSORY_READ_BUFFER)
             try {
@@ -112,11 +115,20 @@ class AccessoryConnectionService : Service() {
                         continue
                     }
                     emptyReads = 0
-                    pipeOut.write(buffer, 0, n)
+                    // A reader left over from an earlier session can stay blocked
+                    // in read() on the old fd after it was closed, and the kernel
+                    // then hands it the car's next transfer. That stole the car's
+                    // TLS ClientHello right after our version answer (the
+                    // "silence after version" seen with the CarlinKit adapter and
+                    // the DHU). Whatever any reader gets belongs to the current
+                    // session, so always deliver to the latest sink.
+                    val sink = currentSink ?: pipeOut
+                    if (sink !== pipeOut) Log.i(TAG, "Earlier USB reader got $n bytes; passing them to the current session")
+                    sink.write(buffer, 0, n)
                     // Without flush the piped reader only wakes on its 1 s poll:
                     // our version answer went out a second late and the CarlinKit
                     // adapter stopped before TLS.
-                    pipeOut.flush()
+                    sink.flush()
                 }
             } catch (e: Exception) {
                 Log.i(TAG, "USB reader stopped: ${e.message}")
