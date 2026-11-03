@@ -51,6 +51,8 @@ private object MediaMessage {
 }
 
 private const val VERSION_STATUS_SUCCESS = 0x0000
+private const val PHONE_VERSION_MAJOR: Short = 1
+private const val PHONE_VERSION_MINOR: Short = 6
 
 private const val VIDEO_FOCUS_PROJECTED = 1L
 private const val AUDIO_FOCUS_GAIN = 1L
@@ -58,6 +60,9 @@ private const val TOUCH_ACTION_DOWN = 0L
 
 /** Largest frame the Pi's software H.264 encoder keeps up with (1280x720). */
 private const val MAX_ENCODE_PIXELS = 1280 * 720
+
+/** Well under the 5 s after which a CarlinKit-family car gives up on us. */
+private const val PING_INTERVAL_MS = 1000L
 
 /** How long a media send waits for a free slot before going ahead anyway. */
 private const val ACK_WAIT_SECONDS = 2L
@@ -182,12 +187,16 @@ class AapSession(
 
     fun run() {
         try {
+            // Load the TLS key before answering the version request: the car's
+            // first TLS message follows our answer within milliseconds.
+            val engine = TlsChannel.serverEngine()
             performVersionHandshake()
-            val tls = performTlsHandshake()
+            val tls = performTlsHandshake(engine)
 
             readAuthComplete()
             sendServiceDiscoveryRequest(tls)
             val services = readServiceDiscoveryResponse(tls)
+            startPinging(tls)
 
             val video = services.first { it.isVideo }
             val (configIndex, config) = chooseVideoConfig(video.videoConfigs)
@@ -243,15 +252,24 @@ class AapSession(
         // Response id: unconfirmed guess (request id + 1, a common pairing
         // convention) -- the next test run's log will tell us if this is wrong,
         // same way the request's real id (3, not our earlier guess of 1) did.
+        sendVersionResponse(requestId, major, minor)
+    }
+
+    /**
+     * Answer with our own version rather than echoing the car's: a real car
+     * that asked for 1.1 went silent after an echo. The CarlinKit's phone side
+     * answers 1.6 regardless of the request, and cars accept it.
+     */
+    private fun sendVersionResponse(requestId: Int, major: Short, minor: Short) {
         val responseId = requestId + 1
         val response = ByteBuffer.allocate(8)
             .putShort(responseId.toShort())
-            .putShort(major)
-            .putShort(minor)
+            .putShort(PHONE_VERSION_MAJOR)
+            .putShort(PHONE_VERSION_MINOR)
             .putShort(VERSION_STATUS_SUCCESS.toShort())
             .array()
         writer.writeFrame(AapFrame(CONTROL_CHANNEL, AapFrame.FLAG_UNFRAGMENTED, response))
-        Log.i(TAG, "Sent VERSION_RESPONSE (messageId=$responseId) echoing $major.$minor, status=SUCCESS")
+        Log.i(TAG, "Sent VERSION_RESPONSE (messageId=$responseId) $PHONE_VERSION_MAJOR.$PHONE_VERSION_MINOR to car's $major.$minor, status=SUCCESS")
     }
 
     private fun ByteArray.toHex(): String = joinToString(" ") { "%02x".format(it) }
@@ -301,6 +319,25 @@ class AapSession(
         }
         require(services.any { it.isVideo }) { "Car offered no video service" }
         return services
+    }
+
+    /**
+     * The phone pings the car. The CarlinKit firmware's car side (libSdAuto
+     * strings) logs "do not receive ping in 5s, exit now!", so a car of that
+     * family drops a session without regular pings from us.
+     */
+    private fun startPinging(tls: TlsChannel) {
+        Thread({
+            try {
+                while (running) {
+                    val body = ProtoWriter().varint(1, System.nanoTime() / 1000).toByteArray()
+                    sendMessage(CONTROL_CHANNEL, ControlMessage.PING_REQUEST, body, tls)
+                    Thread.sleep(PING_INTERVAL_MS)
+                }
+            } catch (t: Throwable) {
+                Log.i(TAG, "Pinging stopped: ${t.message}")
+            }
+        }, "aap-ping").apply { isDaemon = true }.start()
     }
 
     /** Tells the car which of its keycodes we want; it echoes a status. */
@@ -384,6 +421,7 @@ class AapSession(
                 val timestamp = ProtoReader(message.body).varints(1).firstOrNull() ?: 0
                 sendMessage(CONTROL_CHANNEL, ControlMessage.PING_RESPONSE, ProtoWriter().varint(1, timestamp).toByteArray(), tls)
             }
+            message.channel == CONTROL_CHANNEL && message.id == ControlMessage.PING_RESPONSE -> Unit
             message.id == MediaMessage.ACK -> when (message.channel) {
                 videoStream?.channel -> videoStream?.onAck(message.body)
                 audioStream?.channel -> audioStream?.onAck(message.body)
@@ -492,18 +530,35 @@ class AapSession(
     private fun AapFrame.messageId(): Int =
         ((payload[0].toInt() and 0xFF) shl 8) or (payload[1].toInt() and 0xFF)
 
-    private fun performTlsHandshake(): TlsChannel {
-        val engine = TlsChannel.serverEngine()
+    private fun performTlsHandshake(engine: javax.net.ssl.SSLEngine): TlsChannel {
         val tls = TlsChannel(
             engine = engine,
             // TLS bytes travel inside an SSL_HANDSHAKE control message: a two-byte
             // message id in front of the raw TLS record(s). Unconfirmed against a
             // live peer until the next run.
             readCipherText = {
-                val frame = reader.readFrame()
-                require(frame.channelId == CONTROL_CHANNEL) { "Expected control channel, got ${frame.channelId}" }
-                Log.i(TAG, "TLS frame in: flags=0x${frame.flags.toString(16)} ${frame.payload.size} bytes, head=${frame.payload.take(8).toByteArray().toHex()}")
-                val messageId = ((frame.payload[0].toInt() and 0xFF) shl 8) or (frame.payload[1].toInt() and 0xFF)
+                val first = reader.readFrame()
+                require(first.channelId == CONTROL_CHANNEL) { "Expected control channel, got ${first.channelId}" }
+                Log.i(TAG, "TLS frame in: flags=0x${first.flags.toString(16)} ${first.payload.size} bytes, head=${first.payload.take(8).toByteArray().toHex()}")
+                // Whole handshake messages are small; log them in full to see
+                // exactly what the car's TLS offers.
+                if (first.payload.size <= 1024) {
+                    first.payload.toList().chunked(200).forEachIndexed { i, piece ->
+                        Log.i(TAG, "  tls[$i]: ${piece.toByteArray().toHex()}")
+                    }
+                }
+                var messageId = ((first.payload[0].toInt() and 0xFF) shl 8) or (first.payload[1].toInt() and 0xFF)
+                // The CarlinKit adapter repeats its version request when it gets
+                // no TLS from us within ~30 s; answer again and keep waiting.
+                var current = first
+                while (messageId == ControlMessage.VERSION_REQUEST) {
+                    Log.i(TAG, "Car repeated VERSION_REQUEST; answering again")
+                    sendVersionResponse(messageId, 0, 0)
+                    current = reader.readFrame()
+                    messageId = ((current.payload[0].toInt() and 0xFF) shl 8) or (current.payload[1].toInt() and 0xFF)
+                    Log.i(TAG, "TLS frame in: flags=0x${current.flags.toString(16)} ${current.payload.size} bytes, head=${current.payload.take(8).toByteArray().toHex()}")
+                }
+                val frame = current
                 if (messageId == ControlMessage.SSL_HANDSHAKE) {
                     frame.payload.copyOfRange(2, frame.payload.size)
                 } else {

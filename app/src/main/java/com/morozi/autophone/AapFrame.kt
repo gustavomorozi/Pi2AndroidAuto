@@ -71,11 +71,17 @@ class AapFrameWriter(rawOutput: OutputStream) {
     @Synchronized
     fun writeFrame(frame: AapFrame, totalSize: Int = 0) {
         require(frame.payload.size <= 0xFFFF) { "Frame payload too large: ${frame.payload.size}" }
-        output.writeByte(frame.channelId)
-        output.writeByte(frame.flags)
-        output.writeShort(frame.payload.size)
-        if (frame.isFirstChunk && !frame.isLastChunk) output.writeInt(totalSize)
-        output.write(frame.payload)
+        // Build the whole frame first and write it once: on USB every write is
+        // its own transfer, and the car expects a frame per transfer.
+        val bytes = java.io.ByteArrayOutputStream(8 + frame.payload.size)
+        DataOutputStream(bytes).apply {
+            writeByte(frame.channelId)
+            writeByte(frame.flags)
+            writeShort(frame.payload.size)
+            if (frame.isFirstChunk && !frame.isLastChunk) writeInt(totalSize)
+            write(frame.payload)
+        }
+        output.write(bytes.toByteArray())
         output.flush()
     }
 }

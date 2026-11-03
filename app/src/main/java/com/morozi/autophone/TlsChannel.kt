@@ -6,7 +6,7 @@ import java.math.BigInteger
 import java.nio.ByteBuffer
 import java.security.KeyPairGenerator
 import java.security.KeyStore
-import java.security.spec.ECGenParameterSpec
+import java.security.spec.RSAKeyGenParameterSpec
 import javax.net.ssl.KeyManagerFactory
 import javax.net.ssl.SSLContext
 import javax.net.ssl.SSLEngine
@@ -176,7 +176,12 @@ class TlsChannel(
     }
 
     companion object {
-        private const val KEY_ALIAS = "aap_phone_identity"
+        // RSA: the CarlinKit adapter's TLS rejected our first, EC P-256 key with
+        // WRONG_CURVE; Android Auto peers expect RSA certificates.
+        // v2: the CarlinKit adapter picks plain RSA key exchange, for which
+        // BoringSSL asks the key for a raw (no padding) decrypt; v1 only allowed
+        // PKCS#1 and failed with "RSA routines: internal error".
+        private const val KEY_ALIAS = "aap_phone_identity_rsa2"
 
         /**
          * The head unit opens TLS as the client (captured: its first SSL_HANDSHAKE
@@ -184,8 +189,32 @@ class TlsChannel(
          * present a certificate. We use our own self-signed EC key kept in the
          * Android keystore, generated once on first use.
          */
+        /**
+         * Built once and kept: loading the keystore took ~1 s on the Pi, and a
+         * version answer that late made the CarlinKit adapter stop before TLS.
+         */
+        @Volatile private var cachedContext: SSLContext? = null
+
         fun serverEngine(): SSLEngine {
+            val context = cachedContext ?: synchronized(this) {
+                cachedContext ?: buildContext().also { cachedContext = it }
+            }
+            return context.createSSLEngine().apply {
+                useClientMode = false
+                // Captured ClientHello from the CarlinKit adapter (TLS 1.2) offers
+                // only RSA key exchange and DHE-RSA suites, no ECDHE. Make sure the
+                // plain-RSA ones we support are switched on alongside the defaults.
+                val wanted = supportedCipherSuites.filter { it.startsWith("TLS_RSA_WITH_AES_") }
+                enabledCipherSuites = (enabledCipherSuites.toList() + wanted).distinct().toTypedArray()
+            }
+        }
+
+        private fun buildContext(): SSLContext {
             val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+            // The key manager offers every key in the store; an older EC key
+            // left there got picked over the RSA one and the CarlinKit adapter
+            // (RSA-only suites, no curves offered) failed with WRONG_CURVE.
+            keyStore.aliases().toList().filter { it != KEY_ALIAS }.forEach { keyStore.deleteEntry(it) }
             if (!keyStore.containsAlias(KEY_ALIAS)) generateIdentity()
 
             val keyManagers = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm())
@@ -193,19 +222,25 @@ class TlsChannel(
                 .keyManagers
             val context = SSLContext.getInstance("TLS")
             context.init(keyManagers, null, null)
-            return context.createSSLEngine().apply {
-                useClientMode = false
-            }
+            return context
         }
 
         private fun generateIdentity() {
-            val spec = KeyGenParameterSpec.Builder(KEY_ALIAS, KeyProperties.PURPOSE_SIGN)
-                .setAlgorithmParameterSpec(ECGenParameterSpec("secp256r1"))
-                .setDigests(KeyProperties.DIGEST_NONE, KeyProperties.DIGEST_SHA256)
+            // Sign for ECDHE_RSA suites, decrypt for plain RSA key exchange,
+            // which older TLS 1.2 peers may still pick.
+            val spec = KeyGenParameterSpec.Builder(KEY_ALIAS, KeyProperties.PURPOSE_SIGN or KeyProperties.PURPOSE_DECRYPT)
+                .setAlgorithmParameterSpec(RSAKeyGenParameterSpec(2048, RSAKeyGenParameterSpec.F4))
+                .setDigests(
+                    KeyProperties.DIGEST_NONE, KeyProperties.DIGEST_SHA1, KeyProperties.DIGEST_SHA256,
+                    KeyProperties.DIGEST_SHA384, KeyProperties.DIGEST_SHA512
+                )
+                .setSignaturePaddings(KeyProperties.SIGNATURE_PADDING_RSA_PKCS1, KeyProperties.SIGNATURE_PADDING_RSA_PSS)
+                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE, KeyProperties.ENCRYPTION_PADDING_RSA_PKCS1)
+                .setRandomizedEncryptionRequired(false)
                 .setCertificateSubject(X500Principal("CN=Morozi Auto Phone"))
                 .setCertificateSerialNumber(BigInteger.ONE)
                 .build()
-            KeyPairGenerator.getInstance(KeyProperties.KEY_ALGORITHM_EC, "AndroidKeyStore").apply {
+            KeyPairGenerator.getInstance(KeyProperties.KEY_ALGORITHM_RSA, "AndroidKeyStore").apply {
                 initialize(spec)
                 generateKeyPair()
             }

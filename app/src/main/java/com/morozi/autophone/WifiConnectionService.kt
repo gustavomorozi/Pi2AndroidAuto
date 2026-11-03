@@ -41,6 +41,9 @@ class WifiConnectionService : Service() {
 
         if (web == null) {
             web = ConfigWebServer(this) { reload() }.also { it.start() }
+            // Create the TLS key now: generating it on first connect took long
+            // enough that the CarlinKit adapter gave up on the handshake.
+            thread(name = "tls-key-warmup") { TlsChannel.serverEngine() }
         }
         if (intent?.action == ACTION_RELOAD || generation == 0) reload()
         return START_STICKY

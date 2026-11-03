@@ -1,0 +1,16 @@
+# Test helpers for the Pi build (userdebug). Installed at /system/etc/init/.
+service morozi_usbctl /system/bin/sh /system/bin/morozi_usbctl.sh
+    user root
+    group root
+    seclabel u:r:su:s0
+    oneshot
+    disabled
+
+on property:debug.morozi.usb=off
+    start morozi_usbctl
+
+on property:debug.morozi.usb=on
+    start morozi_usbctl
+
+on property:debug.morozi.usb=rebind
+    start morozi_usbctl
