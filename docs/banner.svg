@@ -1,0 +1,161 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 600" width="1600" height="600" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fbfcfe"/>
+      <stop offset="1" stop-color="#eef2f6"/>
+    </linearGradient>
+    <linearGradient id="board" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#4fbf6c"/>
+      <stop offset="1" stop-color="#2f9a4f"/>
+    </linearGradient>
+    <linearGradient id="metal" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f4f6f8"/>
+      <stop offset="1" stop-color="#b9c1c9"/>
+    </linearGradient>
+    <linearGradient id="lake" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#bfe3f5"/>
+      <stop offset="1" stop-color="#7cc4e8"/>
+    </linearGradient>
+    <linearGradient id="mapsky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#e9f5fb"/>
+      <stop offset="1" stop-color="#f9fbf4"/>
+    </linearGradient>
+    <clipPath id="screenClip"><rect x="736" y="250" width="770" height="226" rx="14"/></clipPath>
+    <filter id="soft" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#1d2b38" flood-opacity="0.18"/>
+    </filter>
+  </defs>
+
+  <!-- background -->
+  <rect width="1600" height="600" fill="url(#sky)"/>
+
+  <!-- distant landscape, top right -->
+  <g opacity="0.75">
+    <path d="M1010 215 Q1100 140 1190 150 T1330 128 T1460 120 T1600 112 V215 Z" fill="#cfdde8"/>
+    <path d="M1070 230 Q1190 160 1290 182 T1460 160 T1600 168 V230 Z" fill="#b7cddd"/>
+    <path d="M1160 232 Q1330 204 1600 205 V250 Q1380 236 1160 232 Z" fill="url(#lake)" opacity="0.6"/>
+    <g fill="none" stroke="#c9d6e0" stroke-width="2" stroke-linecap="round">
+      <path d="M1130 82 q14 -18 30 -6 q10 -16 28 -4 q16 -6 18 10"/>
+      <path d="M1400 60 q12 -14 26 -4 q10 -12 24 -2 q14 -4 14 8"/>
+    </g>
+  </g>
+
+  <!-- dashboard line art -->
+  <g fill="none" stroke="#c4ced8" stroke-width="2.5" stroke-linecap="round">
+    <path d="M0 250 C 260 236 520 232 700 238"/>
+    <path d="M0 520 C 200 470 420 452 640 470"/>
+    <path d="M40 600 C 120 540 230 510 380 505"/>
+    <path d="M600 600 C 640 560 690 540 720 540"/>
+    <path d="M1520 600 C 1560 560 1590 540 1600 535"/>
+    <path d="M700 238 C 900 230 1250 226 1600 232" stroke-dasharray="0"/>
+  </g>
+  <g fill="none" stroke="#d6dee6" stroke-width="2" stroke-dasharray="10 12">
+    <path d="M60 600 C 150 520 300 480 460 470"/>
+  </g>
+
+  <!-- title -->
+  <text x="70" y="140" font-size="112" font-weight="800" letter-spacing="-3" fill="#22313f">Pi<tspan fill="#3ddc84">2</tspan>AndroidAuto</text>
+  <text x="76" y="190" font-size="30" font-weight="500" fill="#5a6b7b">Raspberry Pi 5 · Android TV → tela do carro / car display</text>
+
+  <!-- Raspberry Pi board (isometric-ish) -->
+  <g transform="translate(60 300) skewX(-18) scale(1 0.62)" filter="url(#soft)">
+    <rect x="80" y="0" width="420" height="270" rx="18" fill="url(#board)" stroke="#23733b" stroke-width="3"/>
+    <!-- mount holes -->
+    <g fill="#d9b44a" stroke="#a98622" stroke-width="2">
+      <circle cx="104" cy="24" r="10"/><circle cx="476" cy="24" r="10"/>
+      <circle cx="104" cy="246" r="10"/><circle cx="420" cy="246" r="10"/>
+    </g>
+    <!-- GPIO header -->
+    <rect x="140" y="12" width="250" height="34" rx="3" fill="#20262c"/>
+    <g fill="#e2b93b">
+      <circle cx="152" cy="22" r="3.5"/><circle cx="164" cy="22" r="3.5"/><circle cx="176" cy="22" r="3.5"/><circle cx="188" cy="22" r="3.5"/><circle cx="200" cy="22" r="3.5"/><circle cx="212" cy="22" r="3.5"/><circle cx="224" cy="22" r="3.5"/><circle cx="236" cy="22" r="3.5"/><circle cx="248" cy="22" r="3.5"/><circle cx="260" cy="22" r="3.5"/><circle cx="272" cy="22" r="3.5"/><circle cx="284" cy="22" r="3.5"/><circle cx="296" cy="22" r="3.5"/><circle cx="308" cy="22" r="3.5"/><circle cx="320" cy="22" r="3.5"/><circle cx="332" cy="22" r="3.5"/><circle cx="344" cy="22" r="3.5"/><circle cx="356" cy="22" r="3.5"/><circle cx="368" cy="22" r="3.5"/><circle cx="380" cy="22" r="3.5"/>
+      <circle cx="152" cy="36" r="3.5"/><circle cx="164" cy="36" r="3.5"/><circle cx="176" cy="36" r="3.5"/><circle cx="188" cy="36" r="3.5"/><circle cx="200" cy="36" r="3.5"/><circle cx="212" cy="36" r="3.5"/><circle cx="224" cy="36" r="3.5"/><circle cx="236" cy="36" r="3.5"/><circle cx="248" cy="36" r="3.5"/><circle cx="260" cy="36" r="3.5"/><circle cx="272" cy="36" r="3.5"/><circle cx="284" cy="36" r="3.5"/><circle cx="296" cy="36" r="3.5"/><circle cx="308" cy="36" r="3.5"/><circle cx="320" cy="36" r="3.5"/><circle cx="332" cy="36" r="3.5"/><circle cx="344" cy="36" r="3.5"/><circle cx="356" cy="36" r="3.5"/><circle cx="368" cy="36" r="3.5"/><circle cx="380" cy="36" r="3.5"/>
+    </g>
+    <!-- SoC and chips -->
+    <rect x="190" y="90" width="110" height="100" rx="8" fill="#1f2a33"/>
+    <rect x="205" y="105" width="80" height="70" rx="4" fill="#2e3b46"/>
+    <text x="245" y="148" font-size="20" font-weight="700" fill="#9fb3c4" text-anchor="middle">Pi 5</text>
+    <rect x="320" y="96" width="44" height="36" rx="3" fill="#20262c"/>
+    <rect x="320" y="146" width="44" height="30" rx="3" fill="#20262c"/>
+    <rect x="130" y="110" width="40" height="40" rx="3" fill="#20262c"/>
+    <!-- USB-A and Ethernet on the right edge -->
+    <rect x="430" y="60" width="86" height="56" rx="4" fill="url(#metal)" stroke="#8a949e" stroke-width="2"/>
+    <rect x="442" y="72" width="62" height="12" rx="2" fill="#2f74d0"/>
+    <rect x="442" y="92" width="62" height="12" rx="2" fill="#2f74d0"/>
+    <rect x="430" y="124" width="86" height="56" rx="4" fill="url(#metal)" stroke="#8a949e" stroke-width="2"/>
+    <rect x="442" y="136" width="62" height="12" rx="2" fill="#20262c"/>
+    <rect x="442" y="156" width="62" height="12" rx="2" fill="#20262c"/>
+    <rect x="430" y="188" width="86" height="66" rx="4" fill="url(#metal)" stroke="#8a949e" stroke-width="2"/>
+    <rect x="450" y="202" width="46" height="38" rx="3" fill="#3a444d"/>
+    <!-- bottom edge: USB-C power/data and two micro-HDMI -->
+    <rect x="120" y="248" width="44" height="26" rx="8" fill="url(#metal)" stroke="#8a949e" stroke-width="2"/>
+    <rect x="190" y="248" width="48" height="26" rx="4" fill="url(#metal)" stroke="#8a949e" stroke-width="2"/>
+    <rect x="256" y="248" width="48" height="26" rx="4" fill="url(#metal)" stroke="#8a949e" stroke-width="2"/>
+  </g>
+
+  <!-- cable: Pi USB-C -> adapter -> car -->
+  <path d="M138 468 C 150 540 300 560 420 520 S 560 450 590 430" fill="none" stroke="#2a3540" stroke-width="11" stroke-linecap="round"/>
+  <path d="M650 410 C 680 400 700 380 720 372" fill="none" stroke="#2a3540" stroke-width="11" stroke-linecap="round"/>
+  <rect x="126" y="456" width="26" height="26" rx="5" fill="#2a3540"/>
+
+  <!-- wired Android Auto adapter (generic dongle) -->
+  <g filter="url(#soft)">
+    <rect x="580" y="400" width="80" height="48" rx="12" fill="#1f2830" transform="rotate(-14 620 424)"/>
+    <circle cx="620" cy="424" r="5" fill="#3ddc84"/>
+  </g>
+  <text x="620" y="488" font-size="17" fill="#6b7b8a" text-anchor="middle">adaptador / adapter</text>
+
+  <!-- car screen -->
+  <g filter="url(#soft)">
+    <rect x="716" y="232" width="810" height="264" rx="28" fill="#1b232b"/>
+    <rect x="726" y="242" width="790" height="244" rx="22" fill="#2b353f"/>
+  </g>
+  <g clip-path="url(#screenClip)">
+    <!-- mirrored Android TV launcher (left) -->
+    <rect x="736" y="250" width="460" height="226" fill="#0e1116"/>
+    <text x="760" y="282" font-size="16" fill="#e4e8ee">Favoritos</text>
+    <text x="1150" y="282" font-size="15" fill="#e4e8ee" text-anchor="end">14:31</text>
+    <rect x="760" y="296" width="96" height="58" rx="7" fill="#353b4e"/>
+    <text x="808" y="335" font-size="34" fill="#c5cbd6" text-anchor="middle">+</text>
+    <rect x="866" y="296" width="96" height="58" rx="7" fill="#353b4e"/>
+    <g transform="translate(914 325)" fill="none" stroke="#c5cbd6" stroke-width="4">
+      <circle r="9"/>
+      <path d="M0 -17 V-12 M0 12 V17 M-17 0 H-12 M12 0 H17 M-12 -12 L-8.5 -8.5 M8.5 8.5 L12 12 M-12 12 L-8.5 8.5 M8.5 -8.5 L12 -12"/>
+    </g>
+    <text x="760" y="384" font-size="16" fill="#e4e8ee">Todos os apps</text>
+    <rect x="760" y="396" width="132" height="66" rx="8" fill="#353b4e"/>
+    <circle cx="826" cy="429" r="18" fill="#f5f7fa"/>
+    <path d="M814 424 h10 l3 4 h11 v12 h-24 z" fill="#2196f3"/>
+    <rect x="902" y="396" width="132" height="66" rx="8" fill="#f5f7fa"/>
+    <circle cx="968" cy="429" r="19" fill="#1b8a86"/>
+    <circle cx="968" cy="429" r="10" fill="#d4ecea"/>
+    <rect x="1044" y="396" width="132" height="66" rx="8" fill="#353b4e"/>
+    <circle cx="1110" cy="429" r="19" fill="#4a86e8"/>
+    <path d="M1110 417 l3.5 8.5 l8.5 3.5 l-8.5 3.5 l-3.5 8.5 l-3.5 -8.5 l-8.5 -3.5 l8.5 -3.5 z" fill="#ffffff"/>
+    <!-- a car touch landing on a tile -->
+    <circle cx="968" cy="429" r="30" fill="none" stroke="#3ddc84" stroke-width="3" opacity="0.9"/>
+    <circle cx="968" cy="429" r="42" fill="none" stroke="#3ddc84" stroke-width="2" opacity="0.45"/>
+
+    <!-- navigation view (right) -->
+    <rect x="1196" y="250" width="310" height="226" fill="url(#mapsky)"/>
+    <path d="M1196 330 Q1250 300 1300 318 T1400 304 T1506 310 V476 H1196 Z" fill="#d8ebd2"/>
+    <path d="M1380 330 Q1440 318 1506 326 V400 Q1450 380 1400 372 Z" fill="url(#lake)"/>
+    <g stroke="#ffffff" stroke-width="5" fill="none" opacity="0.9">
+      <path d="M1210 476 L1300 360"/>
+      <path d="M1196 420 L1506 440"/>
+      <path d="M1440 476 L1360 330"/>
+    </g>
+    <path d="M1330 476 C 1335 430 1350 400 1380 370 S 1400 330 1395 316" fill="none" stroke="#1a73e8" stroke-width="9" stroke-linecap="round"/>
+    <path d="M1330 440 l-14 26 l14 -8 l14 8 z" fill="#1a73e8" stroke="#ffffff" stroke-width="2"/>
+    <line x1="1196" y1="250" x2="1196" y2="476" stroke="#2b353f" stroke-width="4"/>
+  </g>
+
+  <!-- vents and hazard button under the screen -->
+  <g fill="none" stroke="#c4ced8" stroke-width="2.5">
+    <rect x="800" y="520" width="250" height="70" rx="14"/>
+    <rect x="1190" y="520" width="250" height="70" rx="14"/>
+    <path d="M820 545 H1030 M820 565 H1030 M1210 545 H1420 M1210 565 H1420"/>
+    <rect x="1080" y="528" width="80" height="54" rx="10"/>
+  </g>
+  <path d="M1120 542 l14 24 h-28 z" fill="none" stroke="#e5484d" stroke-width="3.5" stroke-linejoin="round"/>
+</svg>
