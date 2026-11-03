@@ -6,4 +6,7 @@
 -->
 <resources>
     <usb-accessory manufacturer="Android" model="Android Auto" />
+    <!-- Google's Desktop Head Unit and the CarlinKit firmware's car side
+         identify themselves with this model name instead. -->
+    <usb-accessory manufacturer="Android" model="Android Open Automotive Protocol" />
 </resources>
