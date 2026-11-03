@@ -28,6 +28,15 @@ private object ControlMessage {
     const val CHANNEL_OPEN_RESPONSE = 0x0008
     const val PING_REQUEST = 0x000b
     const val PING_RESPONSE = 0x000c
+    const val AUDIO_FOCUS_REQUEST = 0x0012
+    const val AUDIO_FOCUS_RESPONSE = 0x0013
+}
+
+/** Message ids on the input channel. Not yet seen on the wire. */
+private object InputMessage {
+    const val INPUT_EVENT = 0x8001
+    const val KEY_BINDING_REQUEST = 0x8002
+    const val KEY_BINDING_RESPONSE = 0x8003
 }
 
 /** Message ids on a media channel (video here). Not yet seen on the wire. */
@@ -43,9 +52,18 @@ private object MediaMessage {
 
 private const val VERSION_STATUS_SUCCESS = 0x0000
 
-/** Codec value the car listed for its video sink (captured: 3). */
-private const val VIDEO_CODEC_H264 = 3L
 private const val VIDEO_FOCUS_PROJECTED = 1L
+private const val AUDIO_FOCUS_GAIN = 1L
+private const val TOUCH_ACTION_DOWN = 0L
+
+/** Largest frame the Pi's software H.264 encoder keeps up with (1280x720). */
+private const val MAX_ENCODE_PIXELS = 1280 * 720
+
+/** How long a media send waits for a free slot before going ahead anyway. */
+private const val ACK_WAIT_SECONDS = 2L
+
+/** PCM per audio message: ~42 ms of 48 kHz stereo 16-bit. */
+private const val AUDIO_CHUNK_BYTES = 8192
 
 /** Keeps each frame's TLS record under the 16 KiB record limit. */
 private const val MAX_FRAME_PLAINTEXT = 16000
@@ -56,9 +74,8 @@ private const val MAX_FRAME_PLAINTEXT = 16000
  * TLS as the client; we answer the version request and are the TLS server.
  *
  * Current state, tested against our own Open Headunit over Wi-Fi: version,
- * TLS, AUTH_COMPLETE and service discovery work. Opening the video channel and
- * streaming our generated picture is written but not yet confirmed; audio and
- * input are not written.
+ * TLS, AUTH_COMPLETE, service discovery and our generated video all work.
+ * Touch input, the audio beep and ACK-based flow control are new.
  */
 class AapSession(
     rawInput: InputStream,
@@ -70,6 +87,97 @@ class AapSession(
 
     @Volatile private var running = true
 
+    private var videoStream: MediaStream? = null
+    private var audioStream: MediaStream? = null
+    private var audioSampleRate = 48000
+    private var inputChannel = -1
+    private var videoSource: VideoSource? = null
+    private var videoConfig: VideoConfig? = null
+
+    /**
+     * One service from the car's discovery reply. Shapes read off the capture:
+     * field 3 = media sink (field 1 codec, field 3 audio config {rate, bits,
+     * channels}, field 4 video configs), field 4 = input (keycodes in field 1).
+     */
+    private class Service(val channel: Int, val proto: ProtoReader) {
+        private val sink = proto.messages(3).firstOrNull()
+        val codec: Long = sink?.varints(1)?.firstOrNull() ?: 0
+        val isVideo = sink?.messages(4)?.isNotEmpty() == true
+        val isInput = proto.messages(4).isNotEmpty()
+        val audioSampleRate: Int = sink?.messages(3)?.firstOrNull()?.varints(1)?.firstOrNull()?.toInt() ?: 0
+        val audioChannels: Int = sink?.messages(3)?.firstOrNull()?.varints(3)?.firstOrNull()?.toInt() ?: 0
+        // Music/media sink: the stereo 48 kHz one in the capture.
+        val isMediaAudio = !isVideo && audioChannels == 2
+        val keycodes: List<Long> = proto.messages(4).firstOrNull()?.varints(1) ?: emptyList()
+        /** The car's video configurations, in the order it listed them (its preference). */
+        val videoConfigs: List<VideoConfig> = sink?.messages(4)?.map { VideoConfig.from(it) } ?: emptyList()
+    }
+
+    /**
+     * One video configuration offered by the car (captured fields: 1 resolution
+     * code, 2 frame-rate code, 3/4 width/height margins, 5 density). The margins
+     * are how the car fits a standard video size onto a screen of a different
+     * shape: it crops them off, so content must stay inside the remaining area.
+     */
+    private data class VideoConfig(
+        val width: Int, val height: Int, val fps: Int,
+        val marginWidth: Int, val marginHeight: Int, val density: Int
+    ) {
+        companion object {
+            fun from(p: ProtoReader): VideoConfig {
+                val (w, h) = when (p.varints(1).firstOrNull()?.toInt()) {
+                    1 -> 800 to 480
+                    3 -> 1920 to 1080
+                    4 -> 2560 to 1440
+                    5 -> 3840 to 2160
+                    else -> 1280 to 720
+                }
+                val fps = if (p.varints(2).firstOrNull()?.toInt() == 1) 60 else 30
+                return VideoConfig(
+                    w, h, fps,
+                    marginWidth = p.varints(3).firstOrNull()?.toInt() ?: 0,
+                    marginHeight = p.varints(4).firstOrNull()?.toInt() ?: 0,
+                    density = p.varints(5).firstOrNull()?.toInt() ?: 160
+                )
+            }
+        }
+    }
+
+    /**
+     * Picks the car's most preferred configuration our encoder can keep up with.
+     * The Pi 5 encodes H.264 in software (~20 fps at 1280x720 measured), so
+     * anything above 720p is skipped, and 60 fps is capped to 30.
+     */
+    private fun chooseVideoConfig(configs: List<VideoConfig>): Pair<Int, VideoConfig> {
+        val index = configs.indexOfFirst { it.width * it.height <= MAX_ENCODE_PIXELS }.takeIf { it >= 0 } ?: 0
+        val chosen = configs.getOrElse(index) { VideoConfig(1280, 720, 30, 0, 0, 160) }
+        return index to chosen.copy(fps = minOf(chosen.fps, 30))
+    }
+
+    /**
+     * A media channel we send on. The car's CONFIG says how many messages may be
+     * outstanding without an ACK (captured: 12 for video); [send] blocks once
+     * that many are in flight and each ACK frees slots again.
+     */
+    private inner class MediaStream(val channel: Int, maxUnacked: Int, private val tls: TlsChannel) {
+        private val window = java.util.concurrent.Semaphore(maxUnacked)
+        private val loggedAck = java.util.concurrent.atomic.AtomicBoolean(false)
+
+        fun send(id: Int, body: ByteArray) {
+            if (!window.tryAcquire(ACK_WAIT_SECONDS, java.util.concurrent.TimeUnit.SECONDS)) {
+                Log.w(TAG, "No ACK on channel $channel for ${ACK_WAIT_SECONDS}s; sending anyway")
+            }
+            sendMessage(channel, id, body, tls)
+        }
+
+        fun onAck(body: ByteArray) {
+            // ACK body: field 1 session, field 2 how many messages it acknowledges.
+            val count = ProtoReader(body).varints(2).firstOrNull()?.toInt() ?: 1
+            if (loggedAck.compareAndSet(false, true)) Log.i(TAG, "First ACK on channel $channel: ${body.toHex()}")
+            window.release(count)
+        }
+    }
+
     fun run() {
         try {
             performVersionHandshake()
@@ -77,12 +185,34 @@ class AapSession(
 
             readAuthComplete()
             sendServiceDiscoveryRequest(tls)
-            val videoChannel = readServiceDiscoveryResponse(tls)
+            val services = readServiceDiscoveryResponse(tls)
 
-            openChannel(videoChannel, tls)
-            setUpVideo(videoChannel, tls)
-            streamVideo(videoChannel, tls)
-            // Still to do: audio and input channels, touch events from the car.
+            val video = services.first { it.isVideo }
+            val (configIndex, config) = chooseVideoConfig(video.videoConfigs)
+            videoConfig = config
+            Log.i(TAG, "Video config #$configIndex of ${video.videoConfigs.size}: $config")
+            openChannel(video.channel, tls)
+            videoStream = setUpMedia(video, tls, configIndex)
+            sendMessage(
+                video.channel,
+                MediaMessage.VIDEO_FOCUS_INDICATION,
+                ProtoWriter().varint(1, VIDEO_FOCUS_PROJECTED).varint(2, 0).toByteArray(),
+                tls
+            )
+
+            services.firstOrNull { it.isInput }?.let { input ->
+                openChannel(input.channel, tls)
+                bindKeys(input, tls)
+                inputChannel = input.channel
+            }
+            services.firstOrNull { it.isMediaAudio }?.let { audio ->
+                openChannel(audio.channel, tls)
+                requestAudioFocus(tls)
+                audioStream = setUpMedia(audio, tls)
+                audioSampleRate = audio.audioSampleRate
+            }
+
+            streamVideo(tls)
             onEnded("video stream ended")
         } catch (t: Throwable) {
             Log.e(TAG, "Session failed", t)
@@ -157,24 +287,36 @@ class AapSession(
      * (media sink) carries field 4 (video configurations); codec 3 there is
      * H.264.
      */
-    private fun readServiceDiscoveryResponse(tls: TlsChannel): Int {
+    private fun readServiceDiscoveryResponse(tls: TlsChannel): List<Service> {
         val response = readUntil(CONTROL_CHANNEL, ControlMessage.SERVICE_DISCOVERY_RESPONSE, tls)
-        val services = ProtoReader(response).messages(1)
-        for (service in services) {
-            Log.i(TAG, "Service on channel ${service.varints(1).firstOrNull()}: fields ${service.fields().map { it.number }}")
+        val services = ProtoReader(response).messages(1).map { Service(it.varints(1).first().toInt(), it) }
+        for (s in services) {
+            Log.i(
+                TAG,
+                "Service ch=${s.channel} fields=${s.proto.fields().map { it.number }} codec=${s.codec} " +
+                    "video=${s.isVideo} input=${s.isInput} audio=${s.audioSampleRate}Hz/${s.audioChannels}ch"
+            )
         }
-        val video = services.firstOrNull { service ->
-            service.messages(3).any { sink -> sink.messages(4).isNotEmpty() }
-        } ?: error("Car offered no video service")
-        val channel = video.varints(1).first().toInt()
-        val sink = video.messages(3).first()
-        val config = sink.messages(4).first()
-        Log.i(
-            TAG,
-            "Video on channel $channel: codec=${sink.varints(1)} resolution=${config.varints(1)} " +
-                "frameRate=${config.varints(2)} density=${config.varints(5)}"
-        )
-        return channel
+        require(services.any { it.isVideo }) { "Car offered no video service" }
+        return services
+    }
+
+    /** Tells the car which of its keycodes we want; it echoes a status. */
+    private fun bindKeys(input: Service, tls: TlsChannel) {
+        val body = ProtoWriter().apply { input.keycodes.forEach { varint(1, it) } }.toByteArray()
+        sendMessage(input.channel, InputMessage.KEY_BINDING_REQUEST, body, tls)
+        val response = readUntil(input.channel, InputMessage.KEY_BINDING_RESPONSE, tls)
+        Log.i(TAG, "KEY_BINDING_RESPONSE on ${input.channel}: ${response.toHex()}")
+    }
+
+    /**
+     * Asks for permanent audio focus before playing on the media channel. Not
+     * waited on: if the car never answers, the session must not stall here; the
+     * reply (if any) shows up in the incoming log.
+     */
+    private fun requestAudioFocus(tls: TlsChannel) {
+        sendMessage(CONTROL_CHANNEL, ControlMessage.AUDIO_FOCUS_REQUEST, ProtoWriter().varint(1, AUDIO_FOCUS_GAIN).toByteArray(), tls)
+        Log.i(TAG, "Sent AUDIO_FOCUS_REQUEST")
     }
 
     /** Phone asks the car to open one service's channel; body: priority, channel id. */
@@ -186,36 +328,38 @@ class AapSession(
         Log.i(TAG, "CHANNEL_OPEN_RESPONSE on $channel: status=${ProtoReader(response).varints(1)}")
     }
 
-    /** Media setup: we name the codec, the car answers with its config (status, window). */
-    private fun setUpVideo(channel: Int, tls: TlsChannel) {
-        sendMessage(channel, MediaMessage.SETUP, ProtoWriter().varint(1, VIDEO_CODEC_H264).toByteArray(), tls)
-        Log.i(TAG, "Sent media SETUP on channel $channel")
+    /**
+     * Media setup: we name the codec the car listed for this sink, the car
+     * answers with CONFIG (status, max unacked messages), then we START.
+     */
+    private fun setUpMedia(service: Service, tls: TlsChannel, configIndex: Int = 0): MediaStream {
+        val channel = service.channel
+        sendMessage(channel, MediaMessage.SETUP, ProtoWriter().varint(1, service.codec).toByteArray(), tls)
         val config = ProtoReader(readUntil(channel, MediaMessage.CONFIG, tls))
-        Log.i(TAG, "Media CONFIG: status=${config.varints(1)} maxUnacked=${config.varints(2)} configs=${config.varints(3)}")
-
-        sendMessage(channel, MediaMessage.START, ProtoWriter().varint(1, 0).varint(2, 0).toByteArray(), tls)
-        sendMessage(
-            channel,
-            MediaMessage.VIDEO_FOCUS_INDICATION,
-            ProtoWriter().varint(1, VIDEO_FOCUS_PROJECTED).varint(2, 0).toByteArray(),
-            tls
-        )
-        Log.i(TAG, "Sent media START and VIDEO_FOCUS_INDICATION")
+        val maxUnacked = config.varints(2).firstOrNull()?.toInt()?.coerceAtLeast(1) ?: 1
+        Log.i(TAG, "Media CONFIG on $channel: status=${config.varints(1)} maxUnacked=$maxUnacked configs=${config.varints(3)}")
+        // START: field 1 session, field 2 which of the car's configurations we use.
+        sendMessage(channel, MediaMessage.START, ProtoWriter().varint(1, 0).varint(2, configIndex.toLong()).toByteArray(), tls)
+        return MediaStream(channel, maxUnacked, tls)
     }
 
     /**
      * Streams our generated picture. A second thread keeps reading what the car
-     * sends meanwhile (acks, pings, focus requests) so nothing backs up.
+     * sends meanwhile (acks, pings, touches) so nothing backs up.
      */
-    private fun streamVideo(channel: Int, tls: TlsChannel) {
+    private fun streamVideo(tls: TlsChannel) {
+        val stream = videoStream ?: error("Video channel not set up")
+        val config = videoConfig ?: error("Video config not chosen")
         val source = VideoSource(
-            width = 1280, height = 720, fps = 30,
-            onCodecConfig = { sps -> sendMessage(channel, MediaMessage.CODEC_CONFIG, sps, tls) },
+            width = config.width, height = config.height, fps = config.fps,
+            marginWidth = config.marginWidth, marginHeight = config.marginHeight, density = config.density,
+            onCodecConfig = { sps -> stream.send(MediaMessage.CODEC_CONFIG, sps) },
             onFrame = { timestampUs, data ->
                 val body = ByteBuffer.allocate(8 + data.size).putLong(timestampUs).put(data).array()
-                sendMessage(channel, MediaMessage.DATA, body, tls)
+                stream.send(MediaMessage.DATA, body)
             }
         )
+        videoSource = source
         val listener = Thread({
             try {
                 while (running) handleIncoming(readMessage(tls), tls)
@@ -238,8 +382,57 @@ class AapSession(
                 val timestamp = ProtoReader(message.body).varints(1).firstOrNull() ?: 0
                 sendMessage(CONTROL_CHANNEL, ControlMessage.PING_RESPONSE, ProtoWriter().varint(1, timestamp).toByteArray(), tls)
             }
-            message.id == MediaMessage.ACK -> Unit // flow control; not enforced yet
+            message.id == MediaMessage.ACK -> when (message.channel) {
+                videoStream?.channel -> videoStream?.onAck(message.body)
+                audioStream?.channel -> audioStream?.onAck(message.body)
+            }
+            message.channel == inputChannel && message.id == InputMessage.INPUT_EVENT -> onInputEvent(message.body)
             else -> Log.i(TAG, "In: ch=${message.channel} id=0x${message.id.toString(16)} ${message.body.size} bytes: ${message.body.take(32).toByteArray().toHex()}")
+        }
+    }
+
+    /**
+     * Touch from the car. Body read as: field 1 timestamp, field 3 touch event
+     * {field 1 pointer {x, y, id}, field 2 action index, field 3 action}, with
+     * action 0 = down, 1 = up (Android MotionEvent values; to be confirmed).
+     */
+    private fun onInputEvent(body: ByteArray) {
+        val touch = ProtoReader(body).messages(3).firstOrNull()
+        if (touch == null) {
+            Log.i(TAG, "Input event (not touch): ${body.toHex()}")
+            return
+        }
+        val pointer = touch.messages(1).firstOrNull()
+        val x = pointer?.varints(1)?.firstOrNull() ?: -1
+        val y = pointer?.varints(2)?.firstOrNull() ?: -1
+        val action = touch.varints(3).firstOrNull() ?: -1
+        Log.i(TAG, "Touch action=$action at ($x, $y)")
+        if (action == TOUCH_ACTION_DOWN) {
+            videoSource?.showTouch(x.toFloat(), y.toFloat())
+            // Off the reader thread: sending waits on ACKs that this thread reads.
+            Thread({ playBeep() }, "aap-beep").start()
+        }
+    }
+
+    /** A short tone on the media audio channel, so a touch is heard as well as seen. */
+    private fun playBeep() {
+        val stream = audioStream ?: return
+        val rate = audioSampleRate
+        val samples = rate / 4
+        val pcm = ByteBuffer.allocate(samples * 4).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+        for (i in 0 until samples) {
+            val v = (Math.sin(2 * Math.PI * 880 * i / rate) * 8000).toInt().toShort()
+            pcm.putShort(v).putShort(v) // left, right
+        }
+        val bytes = pcm.array()
+        val startUs = System.nanoTime() / 1000
+        var offset = 0
+        while (offset < bytes.size) {
+            val end = minOf(offset + AUDIO_CHUNK_BYTES, bytes.size)
+            val timestampUs = startUs + offset / 4 * 1_000_000L / rate
+            val body = ByteBuffer.allocate(8 + end - offset).putLong(timestampUs).put(bytes, offset, end - offset).array()
+            stream.send(MediaMessage.DATA, body)
+            offset = end
         }
     }
 

@@ -23,6 +23,11 @@ class VideoSource(
     private val width: Int,
     private val height: Int,
     private val fps: Int,
+    /** Pixels the car crops off (split evenly between both sides) to fit its screen. */
+    private val marginWidth: Int = 0,
+    private val marginHeight: Int = 0,
+    /** Car-requested density; UI sizes scale with it like Android dp. */
+    private val density: Int = 160,
     private val onCodecConfig: (ByteArray) -> Unit,
     private val onFrame: (timestampUs: Long, data: ByteArray) -> Unit
 ) {
@@ -62,15 +67,30 @@ class VideoSource(
         running = false
     }
 
+    @Volatile private var touch: Pair<Float, Float>? = null
+    @Volatile private var touchCount = 0
+
+    /** Marks a touch from the car, in video coordinates. */
+    fun showTouch(x: Float, y: Float) {
+        touch = x to y
+        touchCount++
+    }
+
     private fun drawLoop(surface: android.view.Surface) {
         val background = Paint().apply { color = Color.rgb(16, 32, 64) }
         val box = Paint().apply { color = Color.rgb(255, 140, 0) }
+        // Only the area the car keeps after cropping its margins is visible.
+        val left = marginWidth / 2f
+        val top = marginHeight / 2f
+        val areaW = (width - marginWidth).toFloat()
+        val areaH = (height - marginHeight).toFloat()
+        val dp = density / 160f
         val title = Paint().apply {
             color = Color.WHITE
-            textSize = height / 9f
+            textSize = 48 * dp
             isAntiAlias = true
         }
-        val small = Paint(title).apply { textSize = height / 18f }
+        val small = Paint(title).apply { textSize = 24 * dp }
         val clock = SimpleDateFormat("HH:mm:ss", Locale.US)
         val frameMs = 1000L / fps
         var n = 0L
@@ -79,11 +99,19 @@ class VideoSource(
             val canvas = surface.lockHardwareCanvas()
             try {
                 canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), background)
-                val side = height / 6f
-                val x = (n * 8 % (width - side).toLong()).toFloat()
-                canvas.drawRect(x, height * 0.7f, x + side, height * 0.7f + side, box)
-                canvas.drawText("Pi2AndroidAuto", width * 0.08f, height * 0.3f, title)
-                canvas.drawText("Morozi • ${clock.format(Date())} • frame $n", width * 0.08f, height * 0.45f, small)
+                val side = 64 * dp
+                val x = left + (n * 8 % (areaW - side).toLong()).toFloat()
+                canvas.drawRect(x, top + areaH * 0.7f, x + side, top + areaH * 0.7f + side, box)
+                canvas.drawText("Pi2AndroidAuto", left + areaW * 0.08f, top + areaH * 0.3f, title)
+                canvas.drawText("Morozi • ${clock.format(Date())} • frame $n", left + areaW * 0.08f, top + areaH * 0.45f, small)
+                canvas.drawText(
+                    "${width}x$height@$fps margens ${marginWidth}x$marginHeight densidade $density",
+                    left + areaW * 0.08f, top + areaH * 0.53f, small
+                )
+                touch?.let { (tx, ty) ->
+                    canvas.drawCircle(tx, ty, 20 * dp, box)
+                    canvas.drawText("toque $touchCount: (${tx.toInt()}, ${ty.toInt()})", left + areaW * 0.08f, top + areaH * 0.61f, small)
+                }
             } finally {
                 surface.unlockCanvasAndPost(canvas)
             }
