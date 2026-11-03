@@ -1,9 +1,17 @@
 package com.morozi.autophone
 
+import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyProperties
+import java.math.BigInteger
 import java.nio.ByteBuffer
+import java.security.KeyPairGenerator
+import java.security.KeyStore
+import java.security.spec.ECGenParameterSpec
+import javax.net.ssl.KeyManagerFactory
 import javax.net.ssl.SSLContext
 import javax.net.ssl.SSLEngine
 import javax.net.ssl.SSLEngineResult
+import javax.security.auth.x500.X500Principal
 
 /**
  * Drives a [SSLEngine] over a pair of plain read/write functions. This is the
@@ -63,6 +71,44 @@ class TlsChannel(
             out.get(bytes)
             writeCipherText(bytes)
         }
+    }
+
+    /**
+     * Encrypts [plain] into TLS record bytes without sending them. After the
+     * handshake each encrypted AAP frame carries its own record(s), so the caller
+     * frames the result itself.
+     */
+    fun encrypt(plain: ByteArray): ByteArray {
+        val src = ByteBuffer.wrap(plain)
+        val collected = java.io.ByteArrayOutputStream()
+        val out = ByteBuffer.allocate(netBufferSize)
+        while (src.hasRemaining()) {
+            out.clear()
+            val result = engine.wrap(src, out)
+            require(result.status == SSLEngineResult.Status.OK) { "TLS wrap failed: ${result.status}" }
+            out.flip()
+            collected.write(out.array(), 0, out.limit())
+        }
+        return collected.toByteArray()
+    }
+
+    /**
+     * Decrypts the TLS record(s) in one encrypted AAP frame. May return an empty
+     * array when the records carried no application data (e.g. a session ticket).
+     */
+    fun decrypt(cipher: ByteArray): ByteArray {
+        val src = ByteBuffer.wrap(cipher)
+        val collected = java.io.ByteArrayOutputStream()
+        val out = ByteBuffer.allocate(maxOf(appBufferSize, cipher.size))
+        while (src.hasRemaining()) {
+            out.clear()
+            val result = engine.unwrap(src, out)
+            require(result.status == SSLEngineResult.Status.OK) { "TLS unwrap failed: ${result.status}" }
+            out.flip()
+            collected.write(out.array(), 0, out.limit())
+            if (result.bytesConsumed() == 0) break
+        }
+        return collected.toByteArray()
     }
 
     /** Reads one TLS record from the transport and returns its decrypted payload. */
@@ -130,11 +176,38 @@ class TlsChannel(
     }
 
     companion object {
-        fun defaultEngine(isClient: Boolean): SSLEngine {
+        private const val KEY_ALIAS = "aap_phone_identity"
+
+        /**
+         * The head unit opens TLS as the client (captured: its first SSL_HANDSHAKE
+         * payload is a ClientHello), so the phone side must be the TLS server and
+         * present a certificate. We use our own self-signed EC key kept in the
+         * Android keystore, generated once on first use.
+         */
+        fun serverEngine(): SSLEngine {
+            val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+            if (!keyStore.containsAlias(KEY_ALIAS)) generateIdentity()
+
+            val keyManagers = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm())
+                .apply { init(keyStore, null) }
+                .keyManagers
             val context = SSLContext.getInstance("TLS")
-            context.init(null, null, null)
+            context.init(keyManagers, null, null)
             return context.createSSLEngine().apply {
-                useClientMode = isClient
+                useClientMode = false
+            }
+        }
+
+        private fun generateIdentity() {
+            val spec = KeyGenParameterSpec.Builder(KEY_ALIAS, KeyProperties.PURPOSE_SIGN)
+                .setAlgorithmParameterSpec(ECGenParameterSpec("secp256r1"))
+                .setDigests(KeyProperties.DIGEST_NONE, KeyProperties.DIGEST_SHA256)
+                .setCertificateSubject(X500Principal("CN=Morozi Auto Phone"))
+                .setCertificateSerialNumber(BigInteger.ONE)
+                .build()
+            KeyPairGenerator.getInstance(KeyProperties.KEY_ALGORITHM_EC, "AndroidKeyStore").apply {
+                initialize(spec)
+                generateKeyPair()
             }
         }
     }

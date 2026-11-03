@@ -55,7 +55,8 @@ class AccessoryConnectionService : Service() {
         }
         accessoryFd = fd
 
-        val input = FileInputStream(fd.fileDescriptor)
+        Log.i(TAG, "Accessory opened: ${accessory.manufacturer} / ${accessory.model}; waiting for the car")
+        val input = RawLogInputStream(FileInputStream(fd.fileDescriptor))
         val output = FileOutputStream(fd.fileDescriptor)
 
         val aapSession = AapSession(input, output) { reason ->

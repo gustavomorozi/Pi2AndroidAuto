@@ -26,10 +26,17 @@ data class AapFrame(
     val isLastChunk: Boolean get() = (flags and FLAG_LAST_CHUNK) != 0
 
     companion object {
-        const val FLAG_CONTROL = 0x01
-        const val FLAG_ENCRYPTED = 0x02
-        const val FLAG_FIRST_CHUNK = 0x04
-        const val FLAG_LAST_CHUNK = 0x08
+        // Observed on the wire: Open Headunit's VERSION_REQUEST arrives as
+        // 00 03 00 06 ..., i.e. an unfragmented frame carries 0x03. The first
+        // and last bits therefore sit at 0x01 and 0x02; the control and
+        // encrypted bits are still to be confirmed against live traffic.
+        const val FLAG_FIRST_CHUNK = 0x01
+        const val FLAG_LAST_CHUNK = 0x02
+        const val FLAG_CONTROL = 0x04
+        const val FLAG_ENCRYPTED = 0x08
+
+        /** A whole message in one frame. */
+        const val FLAG_UNFRAGMENTED = FLAG_FIRST_CHUNK or FLAG_LAST_CHUNK
     }
 }
 

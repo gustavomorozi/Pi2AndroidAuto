@@ -25,7 +25,29 @@ class MainActivity : Activity() {
         }
         setContentView(statusView)
 
+        startForegroundService(Intent(this, WifiConnectionService::class.java))
+
         handleIntent(intent)
+        if (intent.action != UsbManager.ACTION_USB_ACCESSORY_ATTACHED) {
+            attachToExistingAccessory()
+        }
+    }
+
+    /**
+     * The attach broadcast fires once. If the car already switched us into
+     * accessory mode before this app was running, pick that accessory up here.
+     */
+    private fun attachToExistingAccessory() {
+        val usbManager = getSystemService(USB_SERVICE) as UsbManager
+        val accessory = usbManager.accessoryList?.firstOrNull() ?: return
+        if (!usbManager.hasPermission(accessory)) return
+
+        statusView.text = "Conectado a: ${accessory.manufacturer} / ${accessory.model}\nIniciando sessão..."
+        startForegroundService(
+            Intent(this, AccessoryConnectionService::class.java).apply {
+                putExtra(UsbManager.EXTRA_ACCESSORY, accessory)
+            }
+        )
     }
 
     override fun onNewIntent(intent: Intent) {
