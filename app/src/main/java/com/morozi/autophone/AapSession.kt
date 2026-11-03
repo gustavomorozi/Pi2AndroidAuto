@@ -185,12 +185,52 @@ class AapSession(
         }
     }
 
+    /**
+     * Thrown when the car sends a fresh VERSION_REQUEST in the middle of a
+     * session: it is starting over, so we drop this session and begin a new one
+     * from that request. The CarlinKit TBox phone role does the same (seen with
+     * our bench car); before, we ignored it and the car waited forever.
+     */
+    private class CarRestarted(val request: ByteArray) : Exception("car sent a new version request")
+
+    /** Bumped on every restart so threads of an old session stop on their own. */
+    @Volatile private var generation = 0
+
     fun run() {
+        var pending: ByteArray? = null
         try {
+            while (true) {
+                try {
+                    runOnce(pending)
+                    return
+                } catch (restart: CarRestarted) {
+                    Log.i(TAG, "Car restarted the session; starting over")
+                    pending = restart.request
+                    resetForRestart()
+                }
+            }
+        } catch (t: Throwable) {
+            Log.e(TAG, "Session failed", t)
+            onEnded("error: ${t.message}")
+        }
+    }
+
+    private fun resetForRestart() {
+        generation++
+        videoSource?.stop()
+        videoSource = null
+        videoStream = null
+        audioStream = null
+        inputChannel = -1
+        running = true
+    }
+
+    private fun runOnce(firstRequest: ByteArray?) {
+        run {
             // Load the TLS key before answering the version request: the car's
             // first TLS message follows our answer within milliseconds.
             val engine = TlsChannel.serverEngine()
-            performVersionHandshake()
+            performVersionHandshake(firstRequest)
             val tls = performTlsHandshake(engine)
 
             readAuthComplete()
@@ -224,12 +264,13 @@ class AapSession(
             }
 
             streamVideo(tls)
+            pendingRestart?.let { pendingRestart = null; throw CarRestarted(it) }
             onEnded("video stream ended")
-        } catch (t: Throwable) {
-            Log.e(TAG, "Session failed", t)
-            onEnded("error: ${t.message}")
         }
     }
+
+    /** Set by the incoming-message thread when the car starts over mid-stream. */
+    @Volatile private var pendingRestart: ByteArray? = null
 
     /**
      * We are the phone: the CAR sends VERSION_REQUEST first and waits for our
@@ -238,12 +279,14 @@ class AapSession(
      * own log on that attempt said it "accepted the connection and then sent
      * nothing", i.e. it was the one waiting on *us*). We never write first here.
      */
-    private fun performVersionHandshake() {
-        val frame = reader.readFrame()
-        require(frame.channelId == CONTROL_CHANNEL) { "Expected control channel, got ${frame.channelId}" }
-        Log.i(TAG, "First control frame: flags=0x${frame.flags.toString(16)} bytes=${frame.payload.toHex()}")
+    private fun performVersionHandshake(alreadyRead: ByteArray? = null) {
+        val payload = alreadyRead ?: reader.readFrame().let { frame ->
+            require(frame.channelId == CONTROL_CHANNEL) { "Expected control channel, got ${frame.channelId}" }
+            Log.i(TAG, "First control frame: flags=0x${frame.flags.toString(16)} bytes=${frame.payload.toHex()}")
+            frame.payload
+        }
 
-        val buf = ByteBuffer.wrap(frame.payload)
+        val buf = ByteBuffer.wrap(payload)
         val requestId = buf.short.toInt() and 0xFFFF
         val major = buf.short
         val minor = buf.short
@@ -327,9 +370,10 @@ class AapSession(
      * family drops a session without regular pings from us.
      */
     private fun startPinging(tls: TlsChannel) {
+        val myGeneration = generation
         Thread({
             try {
-                while (running) {
+                while (running && generation == myGeneration) {
                     val body = ProtoWriter().varint(1, System.nanoTime() / 1000).toByteArray()
                     sendMessage(CONTROL_CHANNEL, ControlMessage.PING_REQUEST, body, tls)
                     Thread.sleep(PING_INTERVAL_MS)
@@ -402,6 +446,8 @@ class AapSession(
         val listener = Thread({
             try {
                 while (running) handleIncoming(readMessage(tls), tls)
+            } catch (restart: CarRestarted) {
+                pendingRestart = restart.request
             } catch (t: Throwable) {
                 Log.i(TAG, "Car side closed: ${t.message}")
             } finally {
@@ -494,6 +540,13 @@ class AapSession(
         do {
             val frame = reader.readFrame()
             channel = frame.channelId
+            // A plain (unencrypted), whole VERSION_REQUEST on the control channel
+            // in the middle of a session means the car is starting over.
+            if (channel == CONTROL_CHANNEL && !frame.isEncrypted && frame.isFirstChunk && frame.isLastChunk &&
+                frame.payload.size >= 2 && frame.messageId() == ControlMessage.VERSION_REQUEST
+            ) {
+                throw CarRestarted(frame.payload)
+            }
             plain.write(if (frame.isEncrypted) tls.decrypt(frame.payload) else frame.payload)
         } while (!frame.isLastChunk)
         val bytes = plain.toByteArray()

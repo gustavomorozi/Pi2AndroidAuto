@@ -25,6 +25,11 @@ service morozi_aoawatch /system/bin/sh /system/bin/morozi_aoawatch.sh
 
 on property:sys.boot_completed=1
     start morozi_aoawatch
+    # Present ourselves like the CarlinKit TBox does ("Google" / "Pixel"),
+    # the identity its phone role uses toward the car. Takes effect on the
+    # next enumeration.
+    write /config/usb_gadget/g1/strings/0x409/manufacturer Google
+    write /config/usb_gadget/g1/strings/0x409/product Pixel
 
 on property:debug.morozi.aoawatch=0
     stop morozi_aoawatch
