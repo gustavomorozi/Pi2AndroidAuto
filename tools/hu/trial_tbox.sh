@@ -12,4 +12,4 @@ for i in 1 2 3 4 5 6; do
 done
 wsl -e bash -lc "cd /mnt/c/Users/gutom/.repositorios/morozi-auto-phone/tools/hu && python3 aoa_switch.py 18d1:4ee1"
 sleep 4
-timeout $(( ${1:-20} + 60 )) python hu.py --seconds "${1:-20}"
+timeout $(( ${1:-20} + 60 )) python hu.py --seconds "${1:-20}" ${2:+--dump "$2"}

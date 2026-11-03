@@ -340,7 +340,8 @@ def ccpa_service_discovery_response():
             + pb_bytes(2, b"Morozi") + pb_bytes(3, b"Bench CCPA"))
 
 
-def run(seconds, version, switch_pid=None, pids=(0x2D00, 0x2D01), tcp=None, ccpa=False):
+def run(seconds, version, switch_pid=None, pids=(0x2D00, 0x2D01), tcp=None, ccpa=False, dump_path=None):
+    dump = open(dump_path, "wb") if dump_path else None
     if tcp:
         host, port = tcp.split(":")
         transport = TcpTransport(host, int(port))
@@ -412,6 +413,9 @@ def run(seconds, version, switch_pid=None, pids=(0x2D00, 0x2D01), tcp=None, ccpa
             link.send_enc(ch, 0x8003, pb_varint(1, 0))
         elif mid in (MEDIA_DATA, MEDIA_CODEC_CONFIG):
             frames += 1
+            if dump and ch == VIDEO_CHANNEL:
+                # Raw H.264: data messages start with an 8-byte timestamp.
+                dump.write(body[8:] if mid == MEDIA_DATA else body)
             link.send_enc(ch, MEDIA_ACK, pb_varint(1, 0) + pb_varint(2, 1))
             if frames in (1, 10) or frames % 100 == 0:
                 log(f"<- video message #{frames} ({len(body)}B)")
@@ -429,6 +433,7 @@ if __name__ == "__main__":
     ap.add_argument("--pid", help="accessory-mode PID to open (2d00 or 2d01); default tries both")
     ap.add_argument("--tcp", help="host:port to reach the phone over TCP instead of USB")
     ap.add_argument("--ccpa", action="store_true", help="behave like the CarlinKit CPC200-CCPA")
+    ap.add_argument("--dump", help="write the received H.264 video to this file")
     a = ap.parse_args()
     pids = (int(a.pid, 16),) if a.pid else (0x2D00, 0x2D01)
-    sys.exit(run(a.seconds, a.version, int(a.switch, 16) if a.switch else None, pids, a.tcp, a.ccpa))
+    sys.exit(run(a.seconds, a.version, int(a.switch, 16) if a.switch else None, pids, a.tcp, a.ccpa, a.dump))
