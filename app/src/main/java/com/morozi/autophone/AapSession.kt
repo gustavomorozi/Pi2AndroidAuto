@@ -57,6 +57,10 @@ private const val PHONE_VERSION_MINOR: Short = 6
 private const val VIDEO_FOCUS_PROJECTED = 1L
 private const val AUDIO_FOCUS_GAIN = 1L
 private const val TOUCH_ACTION_DOWN = 0L
+private const val TOUCH_ACTION_UP = 1L
+
+/** H.264 bitrate for the mirrored screen (more detail than the test pattern). */
+private const val SCREEN_BITRATE = 4_000_000
 
 /** Largest frame the Pi's software H.264 encoder keeps up with (1280x720). */
 private const val MAX_ENCODE_PIXELS = 1280 * 720
@@ -433,16 +437,26 @@ class AapSession(
     private fun streamVideo(tls: TlsChannel) {
         val stream = videoStream ?: error("Video channel not set up")
         val config = videoConfig ?: error("Video config not chosen")
-        val source = VideoSource(
+        val onCodecConfig: (ByteArray) -> Unit = { sps -> stream.send(MediaMessage.CODEC_CONFIG, sps) }
+        val onFrame: (Long, ByteArray) -> Unit = { timestampUs, data ->
+            val body = ByteBuffer.allocate(8 + data.size).putLong(timestampUs).put(data).array()
+            stream.send(MediaMessage.DATA, body)
+        }
+        // V2: the real Android TV screen from the privileged screen server, if
+        // it is running; otherwise the V1 test pattern so the car still shows
+        // something.
+        val client = com.morozi.autophone.screen.ScreenClient.connect(
+            config.width, config.height, config.fps, SCREEN_BITRATE, onCodecConfig, onFrame
+        )
+        screenClient = client
+        val source = if (client == null) VideoSource(
             width = config.width, height = config.height, fps = config.fps,
             marginWidth = config.marginWidth, marginHeight = config.marginHeight, density = config.density,
-            onCodecConfig = { sps -> stream.send(MediaMessage.CODEC_CONFIG, sps) },
-            onFrame = { timestampUs, data ->
-                val body = ByteBuffer.allocate(8 + data.size).putLong(timestampUs).put(data).array()
-                stream.send(MediaMessage.DATA, body)
-            }
-        )
+            onCodecConfig = onCodecConfig, onFrame = onFrame
+        ) else null
         videoSource = source
+        Log.i(TAG, if (client != null) "Video: mirrored Android TV screen" else "Video: test pattern (screen server not running)")
+        val stopVideo = { client?.stop(); source?.stop() }
         val listener = Thread({
             try {
                 while (running) handleIncoming(readMessage(tls), tls)
@@ -452,13 +466,18 @@ class AapSession(
                 Log.i(TAG, "Car side closed: ${t.message}")
             } finally {
                 running = false
-                source.stop()
+                stopVideo()
             }
         }, "aap-incoming")
         listener.start()
-        source.run()
+        if (client != null) client.run() else source?.run()
+        stopVideo()
+        screenClient = null
         listener.interrupt()
     }
+
+    /** Set while the mirrored screen is the video source; touches go to it. */
+    @Volatile private var screenClient: com.morozi.autophone.screen.ScreenClient? = null
 
     private fun handleIncoming(message: AapMessage, tls: TlsChannel) {
         when {
@@ -493,6 +512,16 @@ class AapSession(
         val y = pointer?.varints(2)?.firstOrNull() ?: -1
         val action = touch.varints(3).firstOrNull() ?: -1
         Log.i(TAG, "Touch action=$action at ($x, $y)")
+        // V2: a touch on the car is a touch on the Android TV screen.
+        screenClient?.let { screen ->
+            val mapped = when (action) {
+                TOUCH_ACTION_DOWN -> com.morozi.autophone.screen.ScreenProtocol.ACTION_DOWN
+                TOUCH_ACTION_UP -> com.morozi.autophone.screen.ScreenProtocol.ACTION_UP
+                else -> com.morozi.autophone.screen.ScreenProtocol.ACTION_MOVE
+            }
+            screen.touch(mapped, x.toInt(), y.toInt())
+            return
+        }
         if (action == TOUCH_ACTION_DOWN) {
             videoSource?.showTouch(x.toFloat(), y.toFloat())
             // Off the reader thread: sending waits on ACKs that this thread reads.

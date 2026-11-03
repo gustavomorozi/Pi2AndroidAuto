@@ -30,9 +30,24 @@ service morozi_adbon /system/bin/sh /system/bin/morozi_adbon.sh
     oneshot
     disabled
 
+# V2: mirror the Android TV screen to the car and inject its touches.
+# Restart with: setprop debug.morozi.screen 0 && setprop debug.morozi.screen 1
+service morozi_screen /system/bin/sh /system/bin/morozi_screen.sh
+    user root
+    group root input
+    seclabel u:r:su:s0
+    disabled
+
+on property:debug.morozi.screen=0
+    stop morozi_screen
+
+on property:debug.morozi.screen=1
+    start morozi_screen
+
 on property:sys.boot_completed=1
     start morozi_adbon
     start morozi_aoawatch
+    start morozi_screen
     # Present ourselves like the CarlinKit TBox does ("Google" / "Pixel"),
     # the identity its phone role uses toward the car. Takes effect on the
     # next enumeration.

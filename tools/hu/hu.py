@@ -340,7 +340,7 @@ def ccpa_service_discovery_response():
             + pb_bytes(2, b"Morozi") + pb_bytes(3, b"Bench CCPA"))
 
 
-def run(seconds, version, switch_pid=None, pids=(0x2D00, 0x2D01), tcp=None, ccpa=False, dump_path=None, restart=False):
+def run(seconds, version, switch_pid=None, pids=(0x2D00, 0x2D01), tcp=None, ccpa=False, dump_path=None, restart=False, tap=None):
     dump = open(dump_path, "wb") if dump_path else None
     if tcp:
         host, port = tcp.split(":")
@@ -375,7 +375,18 @@ def run(seconds, version, switch_pid=None, pids=(0x2D00, 0x2D01), tcp=None, ccpa
     end = time.time() + seconds
     next_ping = time.time() + 1
     restart_at = time.time() + seconds / 2 if restart else None
+    tap_at = time.time() + seconds / 3
     while time.time() < end:
+        if tap and time.time() >= tap_at:
+            # A car touch on the input channel (1): down then up, the way the
+            # CCPA reports them (field 3 touch {pointer {x, y, id}, index, action}).
+            for action in (0, 1):
+                pointer = pb_bytes(1, pb_varint(1, tap[0]) + pb_varint(2, tap[1]) + pb_varint(3, 0))
+                touch = pointer + pb_varint(2, 0) + pb_varint(3, action)
+                link.send_enc(1, 0x8001, pb_varint(1, int(time.time() * 1e9)) + pb_bytes(3, touch))
+                time.sleep(0.08)
+            log(f"TAP sent at {tap}")
+            tap = None
         if restart_at and time.time() >= restart_at:
             # Start over in the same connection, as the CarlinKit CCPA does:
             # a plain VERSION_REQUEST, wait for the plain answer, new TLS.
@@ -457,6 +468,8 @@ if __name__ == "__main__":
     ap.add_argument("--ccpa", action="store_true", help="behave like the CarlinKit CPC200-CCPA")
     ap.add_argument("--dump", help="write the received H.264 video to this file")
     ap.add_argument("--restart", action="store_true", help="halfway through, start the session over")
+    ap.add_argument("--tap", help="x,y in video coordinates: send one touch a third of the way through")
     a = ap.parse_args()
     pids = (int(a.pid, 16),) if a.pid else (0x2D00, 0x2D01)
-    sys.exit(run(a.seconds, a.version, int(a.switch, 16) if a.switch else None, pids, a.tcp, a.ccpa, a.dump, a.restart))
+    tap = tuple(int(v) for v in a.tap.split(",")) if a.tap else None
+    sys.exit(run(a.seconds, a.version, int(a.switch, 16) if a.switch else None, pids, a.tcp, a.ccpa, a.dump, a.restart, tap))
