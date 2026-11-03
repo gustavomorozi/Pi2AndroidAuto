@@ -551,6 +551,7 @@ class AapSession(
      */
     private fun trackTapForRemoteOnlyApps(action: Long, x: Int, y: Int, fingers: Int) {
         val now = android.os.SystemClock.uptimeMillis()
+        if (action == TOUCH_ACTION_DOWN) com.morozi.autophone.screen.TapAssistService.instance?.onCarTouch()
         if (action == TOUCH_ACTION_DOWN) tapFingers = fingers else tapFingers = maxOf(tapFingers, fingers)
         when (action) {
             TOUCH_ACTION_DOWN -> { tapDownX = x; tapDownY = y; tapDownAt = now }

@@ -9,6 +9,8 @@ import android.graphics.Paint
 import android.graphics.PixelFormat
 import android.graphics.Rect
 import android.graphics.drawable.GradientDrawable
+import android.os.Handler
+import android.os.Looper
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.MotionEvent
@@ -21,7 +23,8 @@ import kotlin.math.abs
 /**
  * The floating button shown over the Android TV screen while a car is
  * connected, like the CarlinKit one: drag it anywhere; tap it to open
- * Back, Home and Recents.
+ * Back, Home and Recents. It slides away after [IDLE_MS] without a car touch,
+ * so it does not sit over a video, and any car touch brings it back.
  *
  * It is an accessibility overlay of [TapAssistService], so it needs no extra
  * permission and is part of the mirrored picture the car shows. Call from the
@@ -37,6 +40,10 @@ class CarControls(private val service: AccessibilityService) {
 
     private var button: View? = null
     private var menu: View? = null
+    /** True while a car shows the mirrored screen; the button may then come and go. */
+    private var active = false
+    private val main = Handler(Looper.getMainLooper())
+    private val idle = Runnable { slideAway() }
     private val buttonParams = overlayParams().apply {
         width = buttonSize
         height = buttonSize
@@ -44,17 +51,40 @@ class CarControls(private val service: AccessibilityService) {
         y = screen.height() / 2 - buttonSize / 2
     }
 
-    val isShown get() = button != null
-
     fun show() {
-        if (button != null) return
-        button = ButtonView(service).also { windows.addView(it, buttonParams) }
+        active = true
+        touched()
     }
 
     fun hide() {
+        active = false
+        main.removeCallbacks(idle)
         closeMenu()
         button?.let { windows.removeView(it) }
         button = null
+    }
+
+    /** A car touch: bring the button back and restart the idle timer. */
+    fun touched() {
+        if (!active) return
+        if (button == null) {
+            button = ButtonView(service).also { view ->
+                view.alpha = 0f
+                view.translationY = -buttonSize / 2f
+                windows.addView(view, buttonParams)
+                view.animate().alpha(1f).translationY(0f).setDuration(ANIM_MS).start()
+            }
+        }
+        main.removeCallbacks(idle)
+        main.postDelayed(idle, IDLE_MS)
+    }
+
+    private fun slideAway() {
+        closeMenu()
+        val view = button ?: return
+        button = null
+        view.animate().alpha(0f).translationY(-buttonSize.toFloat()).setDuration(ANIM_MS)
+            .withEndAction { runCatching { windows.removeView(view) } }.start()
     }
 
     /** True if screen pixel ([x], [y]) is on the button or its open menu. */
@@ -180,6 +210,8 @@ class CarControls(private val service: AccessibilityService) {
     }
 
     private companion object {
+        const val IDLE_MS = 5_000L
+        const val ANIM_MS = 250L
         val PANEL = Color.argb(215, 27, 35, 43)
         val OUTLINE = Color.argb(200, 61, 220, 132)
     }

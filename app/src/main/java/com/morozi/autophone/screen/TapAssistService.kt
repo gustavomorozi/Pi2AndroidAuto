@@ -48,6 +48,9 @@ class TapAssistService : AccessibilityService() {
         Log.i(TAG, "floating button ${if (connected) "shown" else "hidden"}")
     }
 
+    /** Any car touch: the floating button comes back for a while. */
+    fun onCarTouch() = main.post { controls?.touched() }
+
     /** True if screen pixel ([x], [y]) is on the floating button or its menu. */
     fun onControls(x: Int, y: Int): Boolean {
         val result = java.util.concurrent.FutureTask { controls?.contains(x, y) == true }
