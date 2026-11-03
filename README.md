@@ -53,23 +53,26 @@ Ainda não tem: áudio de mídia, microfone, sensores e sessão por Wi‑Fi no c
 Ligue o Pi à rede e ative a depuração USB/ADB. Nos exemplos, o Pi está em
 `192.168.0.200`.
 
-1. **Compile o app**
-
-   ```bash
-   ./gradlew assembleDebug
-   ```
-
-2. **Instale tudo com um comando** (app + arquivos de sistema, e reinicia o Pi).
-   No Windows, rode no Git Bash:
+1. **Instale tudo com um comando.** No Windows, rode no Git Bash:
 
    ```bash
    tools/pi/install.sh 192.168.0.200
    ```
 
-   O script instala o APK, copia os arquivos de `tools/pi` para o sistema do
-   Pi (`/system/etc/init`, `/system/bin`, `/system/usr/idc`), libera a rede
-   para o app (`restricted_networking_mode 0`) e reinicia o Pi. Sem endereço,
+   O script compila o app, instala o APK, copia os arquivos de `tools/pi`
+   para o sistema do Pi (`/system/etc/init`, `/system/bin`, `/system/usr/idc`)
+   e libera a rede para o app (`restricted_networking_mode 0`). Sem endereço,
    ele usa o aparelho que o `adb` já enxerga (USB ou rede).
+
+   Pode rodar de novo sem medo:
+   - o app é atualizado no lugar, sem perder as configurações;
+   - o CarLink já instalado fica como está (ele se atualiza sozinho;
+     `--update-carlink` força a reinstalação);
+   - só os arquivos de sistema que mudaram são copiados;
+   - o Pi só reinicia quando um arquivo de sistema mudou. Se não mudou, o
+     script só reinicia o servidor de tela.
+
+   `--no-build` usa o APK já compilado.
 
    Ele também instala o [CarLink](https://github.com/F-e-n-y-x/CarLink), um
    projeto separado (AGPL‑3.0): com ele, um iPhone ou Android ligado nas
@@ -98,7 +101,7 @@ Ligue o Pi à rede e ative a depuração USB/ADB. Nos exemplos, o Pi está em
 
    </details>
 
-3. **Abra o app uma vez** (ícone "Pi2AndroidAuto" no launcher) para ele
+2. **Abra o app uma vez** (ícone "Pi2AndroidAuto" no launcher) para ele
    registrar o acessório USB.
 
 ### Usar no carro
@@ -198,23 +201,27 @@ car. This is an early-stage project.
 Put the Pi on your network and turn on USB/ADB debugging. The examples use
 `192.168.0.200` for the Pi.
 
-1. **Build the app**
-
-   ```bash
-   ./gradlew assembleDebug
-   ```
-
-2. **Install everything with one command** (app + system files, then the Pi
-   reboots). On Windows, run it in Git Bash:
+1. **Install everything with one command.** On Windows, run it in Git Bash:
 
    ```bash
    tools/pi/install.sh 192.168.0.200
    ```
 
-   The script installs the APK, copies the files from `tools/pi` into the
-   Pi's system (`/system/etc/init`, `/system/bin`, `/system/usr/idc`), lets the
-   app use the network (`restricted_networking_mode 0`) and reboots the Pi.
-   Without an address it uses the device `adb` already sees (USB or network).
+   The script builds the app, installs the APK, copies the files from
+   `tools/pi` into the Pi's system (`/system/etc/init`, `/system/bin`,
+   `/system/usr/idc`) and lets the app use the network
+   (`restricted_networking_mode 0`). Without an address it uses the device
+   `adb` already sees (USB or network).
+
+   Safe to run again:
+   - the app is updated in place and keeps its settings;
+   - an installed CarLink is left alone (it updates itself;
+     `--update-carlink` reinstalls it);
+   - only system files that changed are copied;
+   - the Pi reboots only when a system file changed. Otherwise the script
+     just restarts the screen server.
+
+   `--no-build` uses the APK already built.
 
    It also installs [CarLink](https://github.com/F-e-n-y-x/CarLink), a separate
    project (AGPL‑3.0): with it, an iPhone or Android phone plugged into the
@@ -243,7 +250,7 @@ Put the Pi on your network and turn on USB/ADB debugging. The examples use
 
    </details>
 
-3. **Open the app once** ("Pi2AndroidAuto" in the launcher) so it registers
+2. **Open the app once** ("Pi2AndroidAuto" in the launcher) so it registers
    the USB accessory.
 
 ### Use it in the car
