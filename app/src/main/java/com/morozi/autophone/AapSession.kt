@@ -59,6 +59,10 @@ private const val AUDIO_FOCUS_GAIN = 1L
 private const val TOUCH_ACTION_DOWN = 0L
 private const val TOUCH_ACTION_UP = 1L
 
+/** A tap: released within this time, moved less than this (video pixels). */
+private const val TAP_MAX_MS = 600L
+private const val TAP_SLOP_PX = 20
+
 /** H.264 bitrate for the mirrored screen (more detail than the test pattern). */
 private const val SCREEN_BITRATE = 4_000_000
 
@@ -520,12 +524,43 @@ class AapSession(
                 else -> com.morozi.autophone.screen.ScreenProtocol.ACTION_MOVE
             }
             screen.touch(mapped, x.toInt(), y.toInt())
+            trackTapForRemoteOnlyApps(action, x.toInt(), y.toInt())
             return
         }
         if (action == TOUCH_ACTION_DOWN) {
             videoSource?.showTouch(x.toFloat(), y.toFloat())
             // Off the reader thread: sending waits on ACKs that this thread reads.
             Thread({ playBeep() }, "aap-beep").start()
+        }
+    }
+
+    private var tapDownX = 0
+    private var tapDownY = 0
+    private var tapDownAt = 0L
+
+    /**
+     * TV launchers ignore real taps (they act on remote focus and OK). A short
+     * tap that stayed in place is also handed to the accessibility helper,
+     * which activates the item under it in those apps only.
+     */
+    private fun trackTapForRemoteOnlyApps(action: Long, x: Int, y: Int) {
+        val now = android.os.SystemClock.uptimeMillis()
+        when (action) {
+            TOUCH_ACTION_DOWN -> { tapDownX = x; tapDownY = y; tapDownAt = now }
+            TOUCH_ACTION_UP -> {
+                val isTap = now - tapDownAt < TAP_MAX_MS &&
+                    kotlin.math.abs(x - tapDownX) < TAP_SLOP_PX && kotlin.math.abs(y - tapDownY) < TAP_SLOP_PX
+                val service = com.morozi.autophone.screen.TapAssistService.instance
+                val config = videoConfig
+                if (!isTap || service == null || config == null) return
+                val metrics = android.content.res.Resources.getSystem().displayMetrics
+                val fit = com.morozi.autophone.screen.ScreenFit.of(
+                    maxOf(metrics.widthPixels, metrics.heightPixels), minOf(metrics.widthPixels, metrics.heightPixels),
+                    config.width, config.height
+                )
+                val (sx, sy) = fit.toScreen(tapDownX, tapDownY) ?: return
+                Thread({ service.tap(sx, sy) }, "aap-tap-assist").start()
+            }
         }
     }
 

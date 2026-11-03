@@ -35,6 +35,20 @@
             </intent-filter>
         </activity>
 
+        <!-- V2: car taps on remote-only TV apps (launcher, TV settings). -->
+        <service
+            android:name=".screen.TapAssistService"
+            android:exported="true"
+            android:label="Pi2AndroidAuto: toques do carro"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/tap_assist" />
+        </service>
+
         <!-- Car switched us into accessory mode: hand off to the service and close. -->
         <activity
             android:name=".AccessoryAttachActivity"

@@ -66,7 +66,7 @@ object ScreenServer {
             val screen = Display.size()
             // The screen is scaled to fit inside the video, keeping its shape;
             // the rest is black. Touches are mapped back through this box.
-            val fit = Fit.of(screen.first, screen.second, width, height)
+            val fit = ScreenFit.of(screen.first, screen.second, width, height)
             Log.i(TAG, "start ${width}x$height@$fps, screen ${screen.first}x${screen.second}, content $fit")
 
             val codec = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
@@ -83,13 +83,21 @@ object ScreenServer {
             }, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
             val surface = codec.createInputSurface()
             codec.start()
-            val mirror = Display.mirror("morozi-car", width, height, surface)
+            // Mirror into a GPU texture that FrameRelay redraws into the
+            // encoder at a fixed rate, so a still screen still sends video.
+            val relay = FrameRelay(surface, width, height)
+            val relayThread = thread(name = "screen-relay") {
+                runCatching { relay.run(fps) }.onFailure { Log.e(TAG, "frame relay failed", it); running = false }
+            }
+            val mirror = Display.mirror("morozi-car", width, height, relay.awaitInputSurface())
 
             val touchThread = thread(name = "screen-touch") { readTouches(fit, screen) }
             try {
                 drain(codec)
             } finally {
                 running = false
+                relay.stop()
+                relayThread.join(1000)
                 runCatching { mirror.release() }
                 runCatching { codec.stop() }
                 runCatching { codec.release() }
@@ -99,7 +107,7 @@ object ScreenServer {
             }
         }
 
-        private fun readTouches(fit: Fit, screen: Pair<Int, Int>) {
+        private fun readTouches(fit: ScreenFit, screen: Pair<Int, Int>) {
             try {
                 while (running) {
                     when (input.readUnsignedByte()) {
@@ -138,26 +146,6 @@ object ScreenServer {
                 output.writeInt(data.size)
                 output.write(data)
                 output.flush()
-            }
-        }
-    }
-
-    /** Where the scaled screen sits inside the video, to map car touches back. */
-    private data class Fit(val left: Int, val top: Int, val width: Int, val height: Int,
-                           val screenWidth: Int, val screenHeight: Int) {
-        fun toScreen(x: Int, y: Int): Pair<Int, Int>? {
-            val cx = x - left
-            val cy = y - top
-            if (cx < 0 || cy < 0 || cx >= width || cy >= height) return null
-            return cx * screenWidth / width to cy * screenHeight / height
-        }
-
-        companion object {
-            fun of(screenWidth: Int, screenHeight: Int, videoWidth: Int, videoHeight: Int): Fit {
-                val scale = minOf(videoWidth.toFloat() / screenWidth, videoHeight.toFloat() / screenHeight)
-                val w = (screenWidth * scale).toInt()
-                val h = (screenHeight * scale).toInt()
-                return Fit((videoWidth - w) / 2, (videoHeight - h) / 2, w, h, screenWidth, screenHeight)
             }
         }
     }
