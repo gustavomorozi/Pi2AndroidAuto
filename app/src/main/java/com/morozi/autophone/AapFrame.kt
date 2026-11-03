@@ -81,7 +81,11 @@ class AapFrameWriter(rawOutput: OutputStream) {
             if (frame.isFirstChunk && !frame.isLastChunk) writeInt(totalSize)
             write(frame.payload)
         }
+        val started = System.nanoTime()
         output.write(bytes.toByteArray())
         output.flush()
+        // Diagnostic: how long the transfer took to be accepted by the USB stack.
+        val ms = (System.nanoTime() - started) / 1_000_000
+        android.util.Log.i("AapRaw", "tx ch=${frame.channelId} flags=0x${frame.flags.toString(16)} ${bytes.size()} bytes in $ms ms")
     }
 }

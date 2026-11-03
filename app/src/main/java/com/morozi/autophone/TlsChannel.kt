@@ -205,8 +205,7 @@ class TlsChannel(
                 // only RSA key exchange and DHE-RSA suites, no ECDHE. Make sure the
                 // plain-RSA ones we support are switched on alongside the defaults.
                 val wanted = supportedCipherSuites.filter { it.startsWith("TLS_RSA_WITH_AES_") }
-                enabledCipherSuites = (enabledCipherSuites.toList() + wanted).distinct().toTypedArray()
-            }
+                enabledCipherSuites = (enabledCipherSuites.toList() + wanted).distinct().toTypedArray()            }
         }
 
         private fun buildContext(): SSLContext {
