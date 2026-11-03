@@ -80,6 +80,8 @@ private const val MAX_FRAME_PLAINTEXT = 16000
 class AapSession(
     rawInput: InputStream,
     rawOutput: OutputStream,
+    /** Largest video frame we agree to encode (from [Settings.maxVideoPixels]). */
+    private val maxVideoPixels: Int = MAX_ENCODE_PIXELS,
     private val onEnded: (reason: String) -> Unit
 ) {
     private val reader = AapFrameReader(rawInput)
@@ -149,7 +151,7 @@ class AapSession(
      * anything above 720p is skipped, and 60 fps is capped to 30.
      */
     private fun chooseVideoConfig(configs: List<VideoConfig>): Pair<Int, VideoConfig> {
-        val index = configs.indexOfFirst { it.width * it.height <= MAX_ENCODE_PIXELS }.takeIf { it >= 0 } ?: 0
+        val index = configs.indexOfFirst { it.width * it.height <= maxVideoPixels }.takeIf { it >= 0 } ?: 0
         val chosen = configs.getOrElse(index) { VideoConfig(1280, 720, 30, 0, 0, 160) }
         return index to chosen.copy(fps = minOf(chosen.fps, 30))
     }

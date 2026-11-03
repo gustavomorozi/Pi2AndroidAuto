@@ -1,11 +1,19 @@
 package com.morozi.autophone
 
+import android.Manifest
 import android.app.Activity
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.hardware.usb.UsbAccessory
 import android.hardware.usb.UsbManager
 import android.os.Bundle
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import android.widget.LinearLayout
 import android.widget.TextView
+
+/** Gives the service a moment to open the settings page's port on first launch. */
+private const val SETTINGS_PAGE_DELAY_MS = 800L
 
 /**
  * Entry point. Launched normally (shows status) or by the system when this device
@@ -19,17 +27,36 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         statusView = TextView(this).apply {
-            textSize = 20f
-            setPadding(48, 48, 48, 48)
-            text = "Morozi Auto Phone\n\nAguardando conexão USB com um carro..."
+            textSize = 18f
+            setPadding(48, 24, 48, 8)
+            text = "Pi2AndroidAuto — aguardando o carro (USB ou Wi‑Fi)"
         }
-        setContentView(statusView)
+        // The same settings page phones reach over the network, shown here so
+        // the Pi can be configured from its own screen too.
+        val settingsPage = WebView(this).apply {
+            settings.javaScriptEnabled = false
+            webViewClient = WebViewClient()
+            postDelayed({ loadUrl("http://127.0.0.1:$CONFIG_WEB_PORT/") }, SETTINGS_PAGE_DELAY_MS)
+        }
+        setContentView(LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(statusView)
+            addView(settingsPage, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
+        })
 
+        requestNearbyWifiPermission()
         startForegroundService(Intent(this, WifiConnectionService::class.java))
 
         handleIntent(intent)
         if (intent.action != UsbManager.ACTION_USB_ACCESSORY_ATTACHED) {
             attachToExistingAccessory()
+        }
+    }
+
+    /** The setup hotspot needs the nearby Wi-Fi devices permission (a runtime one). */
+    private fun requestNearbyWifiPermission() {
+        if (checkSelfPermission(Manifest.permission.NEARBY_WIFI_DEVICES) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(Manifest.permission.NEARBY_WIFI_DEVICES), 1)
         }
     }
 

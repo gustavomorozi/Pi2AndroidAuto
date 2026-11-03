@@ -59,7 +59,7 @@ class AccessoryConnectionService : Service() {
         val input = RawLogInputStream(FileInputStream(fd.fileDescriptor))
         val output = FileOutputStream(fd.fileDescriptor)
 
-        val aapSession = AapSession(input, output) { reason ->
+        val aapSession = AapSession(input, output, maxVideoPixels = Settings(this).maxVideoPixels) { reason ->
             Log.i(TAG, "Session ended: $reason")
             stopSelf()
         }
