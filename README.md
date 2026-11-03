@@ -1,67 +1,272 @@
-# Morozi Auto Phone
+# Pi2AndroidAuto
 
-An independent, from-scratch Android implementation of the "phone" side of the
-Android Auto wired protocol — the half of the protocol that, as far as we could
-find, no open-source project had published before (every existing open
-implementation, including [Open Headunit](https://github.com/andreknieriem/open-headunit),
-plays the "car"/head-unit side instead).
+![Pi2AndroidAuto](docs/banner.png)
 
-## Why
+**[Português](#português) · [English](#english)**
 
-This is part of a larger reverse-engineering project studying how commercial
-Android Auto/CarPlay dongles work. We confirmed the wired protocol itself
-(Google's, not any vendor's) works correctly by pairing a real such dongle
-with Open Headunit acting as the car — see the write-up for that in the
-companion `carlinkit-lite-s` notes. This project is the next step: a Raspberry
-Pi running Android, acting as the "phone," generating its own content instead
-of relaying a real device's screen.
+---
 
-## Hardware / OS this targets
+## Português
 
-Developed and tested against a **Raspberry Pi 5** running
-[KonstaKang's unofficial LineageOS 24.0 Android TV build](https://konstakang.com/devices/rpi5/LineageOS24-ATV/)
-(Android 17). That build already has working USB-C gadget mode (ADB/MTP/PTP/tethering
-confirmed), which is what this app needs to be able to act as a USB accessory when
-plugged into a car — no kernel/driver changes required on top of it.
+### O que é
 
-Should work on any Android device with a USB port that supports gadget/accessory
-mode; the Pi 5 + KonstaKang image is just what this project happens to use.
+O Pi2AndroidAuto transforma um **Raspberry Pi 5 com Android TV** no "celular"
+do Android Auto com fio. Ele mostra a tela do Android TV (a mesma imagem que
+sai no HDMI) na central multimídia do carro, e os toques nessa tela comandam o
+Pi.
 
-## Status
-
-Early. Implemented so far:
-- USB accessory registration (`AndroidManifest.xml` + `accessory_filter.xml`)
-- AAP frame read/write (`AapFrame.kt`)
-- Version handshake (`AapSession.kt`)
-- TLS handshake over the control channel via `SSLEngine` (`TlsChannel.kt`)
-
-Not implemented yet: auth-complete, service discovery, channel setup, video
-encoding/streaming, input handling. See the TODO block at the bottom of
-`AapSession.run()`.
-
-## Provenance
-
-Written from scratch. The protocol's general shape (frames, control channel,
-TLS, service discovery) is public knowledge shared by every independent open
-implementation; nothing here was copied from any vendor's reverse-engineered
-code. See the project notes for the explicit rule we're following on this.
-
-## Building
-
-Standard Gradle Android project.
+É um app Android escrito do zero que faz o papel do **celular** no protocolo
+Android Auto (AAP) com fio: TLS, descoberta de serviços, vídeo H.264 e toque.
+Projetos abertos que já existiam fazem o outro lado, o do carro (head unit).
 
 ```
-./gradlew assembleDebug
+ Android TV no Pi 5  ──USB-C──►  adaptador Android Auto  ──USB──►  carro
+ (HDMI espelhado)                 (ex.: CarlinKit CPC200-CCPA)       (tela e toque)
 ```
 
-## Installing
+### Situação
 
-No release APK yet — this only gets through the TLS handshake so far, not
-useful as an installable app on its own. Once it can actually drive a session
-(service discovery + video working), a built APK and plain install
-instructions (`adb install`, or sideloading via USB storage/file manager on
-the device) will be added here.
+| Versão | O que faz | Testado |
+|---|---|---|
+| **V1** (tag `v1.0`, branch `master`) | Sessão Android Auto completa por USB, tela de teste gerada, toque, 30 fps | **No carro** (Fiat Argo + CPC200-CCPA) |
+| **V2** (branch `v2`) | Espelha a tela real do Android TV, injeta os toques do carro, abre itens do launcher da TV com um toque | Banco de testes (carro simulado no PC); falta o carro |
 
-## License
+Ainda não tem: áudio de mídia, microfone, sensores e sessão por Wi‑Fi no carro.
+É um projeto em fase inicial.
+
+### O que você precisa
+
+- **Raspberry Pi 5** com a build
+  [LineageOS 24 Android TV do KonstaKANG](https://konstakang.com/devices/rpi5/LineageOS24-ATV/)
+  (userdebug, com `adb root`). Ela já tem o modo gadget USB pelo USB‑C, que é
+  o que deixa o Pi agir como celular.
+- Um **adaptador Android Auto com fio** que faça o papel do carro para o Pi.
+  Testado com o **CarlinKit CPC200‑CCPA (Autokit)**. Ligar o Pi direto num
+  carro com Android Auto com fio deve funcionar pelo mesmo caminho, mas ainda
+  não foi testado.
+- Cabo USB‑C de dados e **alimentação firme** (5 V / 3 A). Porta USB fraca do
+  carro ou do PC derruba a sessão.
+- Um PC com `adb` e Android SDK (JDK 17) para compilar e instalar.
+
+### Instalar
+
+Ligue o Pi à rede e ative a depuração USB/ADB. Nos exemplos, o Pi está em
+`192.168.0.200`.
+
+1. **Compile o app**
+
+   ```bash
+   ./gradlew assembleDebug
+   ```
+
+2. **Instale o app**
+
+   ```bash
+   adb connect 192.168.0.200:5555
+   adb install -r app/build/outputs/apk/debug/app-debug.apk
+   ```
+
+3. **Instale os arquivos de sistema** (servidor de tela da V2, toque virtual,
+   ADB ligado a cada boot, vigia do USB):
+
+   ```bash
+   adb root
+   adb remount
+   adb push tools/pi/morozi.rc /system/etc/init/morozi.rc
+   adb push tools/pi/morozi_adbon.sh tools/pi/morozi_aoawatch.sh tools/pi/morozi_screen.sh tools/pi/morozi_usbctl.sh /system/bin/
+   adb push tools/pi/Vendor_18d1_Product_7a01.idc /system/usr/idc/
+   adb shell chmod 755 /system/bin/morozi_*.sh
+   adb shell settings put global restricted_networking_mode 0
+   adb reboot
+   ```
+
+   No boot, o Pi liga sozinho o ADB por rede (porta 5555), o servidor de tela
+   (`morozi_screen`) e o serviço de acessibilidade que faz o toque abrir
+   itens nos apps feitos só para controle remoto.
+
+4. **Abra o app uma vez** (ícone "Pi2AndroidAuto" no launcher) para ele
+   registrar o acessório USB.
+
+### Usar no carro
+
+1. Ligue o Pi na alimentação e espere o Android TV abrir.
+2. Ligue o **USB‑C do Pi** no adaptador Android Auto, e o adaptador no carro.
+3. A tela do Android TV aparece na central do carro em alguns segundos.
+   Toque na tela do carro para usar o Pi: um toque curto num bloco do launcher
+   abre o app, como o OK do controle.
+
+Se a sessão cair, o app tenta de novo sozinho (até 3 vezes) e depois reinicia o
+USB.
+
+### Configurar (Wi‑Fi do carro, modo)
+
+Três jeitos, todos gravam as mesmas opções:
+
+- **Tela do app** no Pi.
+- **Página web**: `http://<ip-do-pi>:8080`, de qualquer celular ou PC na mesma
+  rede. A página também liga um hotspot de configuração do próprio Pi, para
+  quando não houver rede.
+- **ADB**:
+
+  ```bash
+  adb shell am broadcast -a com.morozi.autophone.CONFIGURE -n com.morozi.autophone/.ConfigReceiver --es mode connect --es host 127.0.0.1
+  ```
+
+  Opções: `mode` (`listen` ou `connect`), `host`, `port`, `ssid`, `password`
+  (Wi‑Fi do carro), `setup_hotspot` (`--ez setup_hotspot true`). A senha
+  nunca é mostrada de volta.
+
+### Banco de testes sem carro
+
+`tools/hu/hu.py` faz o papel do carro no PC (USB via WinUSB ou TCP) e imita o
+CPC200‑CCPA:
+
+```bash
+python tools/hu/hu.py --tcp 192.168.0.200:5277 --ccpa --seconds 12 --tap 220,182
+```
+
+Ele mostra o handshake, conta os quadros de vídeo, pode gravar o H.264
+(`--dump`) e mandar um toque (`--tap x,y` em coordenadas do vídeo).
+
+### Origem
+
+Escrito do zero. O formato geral do protocolo é público e aparece em todas as
+implementações abertas. Comportamentos de adaptadores comerciais foram
+observados em testes, sem copiar código de fornecedores nem de projetos com
+outras licenças.
+
+---
+
+## English
+
+### What it is
+
+Pi2AndroidAuto turns a **Raspberry Pi 5 running Android TV** into the "phone"
+for wired Android Auto. It shows the Android TV screen (the same picture as the
+HDMI output) on the car's display, and touches on that display control the Pi.
+
+It is an Android app, written from scratch, that plays the **phone** side of
+the wired Android Auto protocol (AAP): TLS, service discovery, H.264 video and
+touch. The existing open projects implement the other side, the car (head
+unit).
+
+```
+ Android TV on Pi 5  ──USB-C──►  Android Auto adapter  ──USB──►  car
+ (mirrored HDMI)                  (e.g. CarlinKit CPC200-CCPA)     (display and touch)
+```
+
+### Status
+
+| Version | What it does | Tested |
+|---|---|---|
+| **V1** (tag `v1.0`, branch `master`) | Full Android Auto session over USB, generated test screen, touch, 30 fps | **In a car** (Fiat Argo + CPC200-CCPA) |
+| **V2** (branch `v2`) | Mirrors the real Android TV screen, injects the car's touches, opens TV launcher items with a tap | Test bench (simulated car on a PC); not yet in a car |
+
+Not done yet: media audio, microphone, sensors, and a Wi‑Fi session in the
+car. This is an early-stage project.
+
+### What you need
+
+- **Raspberry Pi 5** running
+  [KonstaKANG's LineageOS 24 Android TV build](https://konstakang.com/devices/rpi5/LineageOS24-ATV/)
+  (userdebug, with `adb root`). It already supports USB gadget mode on the
+  USB‑C port, which is what lets the Pi act as a phone.
+- A **wired Android Auto adapter** that plays the car's role toward the Pi.
+  Tested with the **CarlinKit CPC200‑CCPA (Autokit)**. Plugging the Pi
+  straight into a car with wired Android Auto should work the same way, but
+  it has not been tested.
+- A USB‑C data cable and **solid power** (5 V / 3 A). A weak car or PC USB
+  port drops the session.
+- A PC with `adb` and the Android SDK (JDK 17) to build and install.
+
+### Install
+
+Put the Pi on your network and turn on USB/ADB debugging. The examples use
+`192.168.0.200` for the Pi.
+
+1. **Build the app**
+
+   ```bash
+   ./gradlew assembleDebug
+   ```
+
+2. **Install the app**
+
+   ```bash
+   adb connect 192.168.0.200:5555
+   adb install -r app/build/outputs/apk/debug/app-debug.apk
+   ```
+
+3. **Install the system files** (V2 screen server, virtual touchscreen, ADB
+   on at every boot, USB watcher):
+
+   ```bash
+   adb root
+   adb remount
+   adb push tools/pi/morozi.rc /system/etc/init/morozi.rc
+   adb push tools/pi/morozi_adbon.sh tools/pi/morozi_aoawatch.sh tools/pi/morozi_screen.sh tools/pi/morozi_usbctl.sh /system/bin/
+   adb push tools/pi/Vendor_18d1_Product_7a01.idc /system/usr/idc/
+   adb shell chmod 755 /system/bin/morozi_*.sh
+   adb shell settings put global restricted_networking_mode 0
+   adb reboot
+   ```
+
+   At boot the Pi turns on ADB over the network (port 5555), the screen
+   server (`morozi_screen`) and the accessibility service that lets a tap
+   open items in apps built for the remote only.
+
+4. **Open the app once** ("Pi2AndroidAuto" in the launcher) so it registers
+   the USB accessory.
+
+### Use it in the car
+
+1. Power the Pi and wait for Android TV to start.
+2. Connect the **Pi's USB‑C port** to the Android Auto adapter, and the
+   adapter to the car.
+3. The Android TV screen shows up on the car's display within a few seconds.
+   Touch the car's display to use the Pi: a short tap on a launcher tile opens
+   the app, like the remote's OK button.
+
+If the session drops, the app retries on its own (up to 3 times) and then
+resets USB.
+
+### Configure (car Wi‑Fi, mode)
+
+Three ways, all saving the same settings:
+
+- The **app's own screen** on the Pi.
+- **Web page**: `http://<pi-ip>:8080` from any phone or PC on the same
+  network. The page can also start the Pi's own setup hotspot for when there
+  is no network.
+- **ADB**:
+
+  ```bash
+  adb shell am broadcast -a com.morozi.autophone.CONFIGURE -n com.morozi.autophone/.ConfigReceiver --es mode connect --es host 127.0.0.1
+  ```
+
+  Options: `mode` (`listen` or `connect`), `host`, `port`, `ssid`,
+  `password` (car Wi‑Fi), `setup_hotspot` (`--ez setup_hotspot true`). The
+  password is never shown back.
+
+### Test bench without a car
+
+`tools/hu/hu.py` plays the car on a PC (USB through WinUSB, or TCP) and
+behaves like the CPC200‑CCPA:
+
+```bash
+python tools/hu/hu.py --tcp 192.168.0.200:5277 --ccpa --seconds 12 --tap 220,182
+```
+
+It prints the handshake, counts video frames, can save the H.264 stream
+(`--dump`) and can send a touch (`--tap x,y` in video coordinates).
+
+### Provenance
+
+Written from scratch. The protocol's general shape is public and shared by
+every open implementation. The behavior of commercial adapters was learned by
+observing them in tests, without copying code from vendors or from projects
+under other licenses.
+
+### License
 
 TBD.
