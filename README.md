@@ -71,6 +71,12 @@ Ligue o Pi à rede e ative a depuração USB/ADB. Nos exemplos, o Pi está em
    para o app (`restricted_networking_mode 0`) e reinicia o Pi. Sem endereço,
    ele usa o aparelho que o `adb` já enxerga (USB ou rede).
 
+   Ele também instala o [CarLink](https://github.com/F-e-n-y-x/CarLink), um
+   projeto separado (AGPL‑3.0): com ele, um iPhone ou Android ligado nas
+   portas USB‑A do Pi abre CarPlay ou Android Auto na tela do Pi. O script
+   baixa a última versão da página de releases do CarLink e confere o SHA‑256
+   antes de instalar. Para pular: `tools/pi/install.sh --no-carlink 192.168.0.200`.
+
    No boot, o Pi liga sozinho o ADB por rede (porta 5555), o vigia do USB, o
    servidor de tela (`morozi_screen`) e o serviço de acessibilidade que faz o
    toque abrir itens nos apps feitos só para controle remoto.
@@ -209,6 +215,12 @@ Put the Pi on your network and turn on USB/ADB debugging. The examples use
    Pi's system (`/system/etc/init`, `/system/bin`, `/system/usr/idc`), lets the
    app use the network (`restricted_networking_mode 0`) and reboots the Pi.
    Without an address it uses the device `adb` already sees (USB or network).
+
+   It also installs [CarLink](https://github.com/F-e-n-y-x/CarLink), a separate
+   project (AGPL‑3.0): with it, an iPhone or Android phone plugged into the
+   Pi's USB‑A ports gets CarPlay or Android Auto on the Pi's screen. The script
+   downloads CarLink's latest release and checks its SHA‑256 before installing.
+   To skip it: `tools/pi/install.sh --no-carlink 192.168.0.200`.
 
    At boot the Pi turns on ADB over the network (port 5555), the USB watcher,
    the screen server (`morozi_screen`) and the accessibility service that lets
