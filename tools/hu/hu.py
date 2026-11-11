@@ -325,13 +325,17 @@ class TcpTransport:
     read_exact = Usb.read_exact
 
 
-def ccpa_service_discovery_response():
+RESOLUTIONS = {480: (1, 800, 480), 720: (2, 1280, 720), 1080: (3, 1920, 1080)}
+
+
+def ccpa_service_discovery_response(res=480):
     """Services as the CarlinKit CPC200-CCPA listed them to us (03:56 capture):
     video ch3 800x480@30 (margins 0x12, density 120), touch input ch1,
     48 kHz stereo media audio ch4."""
+    code, width, height = RESOLUTIONS[res]
     video = pb_varint(1, 3) + pb_bytes(3, pb_varint(1, 3) + pb_varint(2, 0) + pb_bytes(4,
-        pb_varint(1, 1) + pb_varint(2, 2) + pb_varint(3, 0) + pb_varint(4, 12) + pb_varint(5, 120)))
-    touch = pb_bytes(2, pb_varint(1, 800) + pb_varint(2, 480))
+        pb_varint(1, code) + pb_varint(2, 2) + pb_varint(3, 0) + pb_varint(4, 12) + pb_varint(5, 120)))
+    touch = pb_bytes(2, pb_varint(1, width) + pb_varint(2, height))
     keys = b"".join(pb_varint(1, k) for k in (1, 2, 3, 4, 5, 19, 20, 21, 22, 23, 84, 85, 87, 88, 126, 127))
     inp = pb_varint(1, 1) + pb_bytes(4, keys + touch)
     audio = pb_varint(1, 4) + pb_bytes(3, pb_varint(1, 1) + pb_varint(2, 3) + pb_bytes(3,
@@ -340,7 +344,7 @@ def ccpa_service_discovery_response():
             + pb_bytes(2, b"Morozi") + pb_bytes(3, b"Bench CCPA"))
 
 
-def run(seconds, version, switch_pid=None, pids=(0x2D00, 0x2D01), tcp=None, ccpa=False, dump_path=None, restart=False, tap=None, swipes=None, holds=None):
+def run(seconds, version, switch_pid=None, pids=(0x2D00, 0x2D01), tcp=None, ccpa=False, dump_path=None, restart=False, tap=None, swipes=None, holds=None, res=480):
     dump = open(dump_path, "wb") if dump_path else None
     if tcp:
         host, port = tcp.split(":")
@@ -456,7 +460,7 @@ def run(seconds, version, switch_pid=None, pids=(0x2D00, 0x2D01), tcp=None, ccpa
             video = pb_varint(1, VIDEO_CHANNEL) + pb_bytes(3, pb_varint(1, 3) + pb_varint(2, 0) + pb_bytes(4,
                 pb_varint(1, 1) + pb_varint(2, 2) + pb_varint(3, 0) + pb_varint(4, 0) + pb_varint(5, 160)))
             resp = pb_bytes(1, video) + pb_bytes(2, b"Morozi") + pb_bytes(3, b"Bench HU")
-            link.send_enc(CONTROL, SD_RESPONSE, ccpa_service_discovery_response() if ccpa else resp)
+            link.send_enc(CONTROL, SD_RESPONSE, ccpa_service_discovery_response(res) if ccpa else resp)
         elif mid == CH_OPEN_REQUEST:
             log(f"<- CHANNEL_OPEN_REQUEST ch{ch} {body.hex()}")
             link.send_enc(ch, CH_OPEN_RESPONSE, pb_varint(1, 0), control=True)
@@ -521,10 +525,11 @@ if __name__ == "__main__":
     ap.add_argument("--tap", action="append", help="x,y in video coordinates: a touch a third of the way through; repeat for more, 2 s apart")
     ap.add_argument("--swipe", action="append", help="x1,y1,x2,y2: a drag in video coordinates (after the taps)")
     ap.add_argument("--hold", action="append", help="x,y,ms: press and hold in video coordinates (after the taps and swipes)")
+    ap.add_argument("--res", type=int, default=480, choices=(480, 720, 1080), help="video size the car offers (CCPA mode)")
     ap.add_argument("--tap2", action="append", help="x,y: like --tap but with two fingers (sent after the --tap ones)")
     a = ap.parse_args()
     pids = (int(a.pid, 16),) if a.pid else (0x2D00, 0x2D01)
     tap = [(1, *map(int, t.split(","))) for t in a.tap or []] + [(2, *map(int, t.split(","))) for t in a.tap2 or []]
     swipes = [tuple(map(int, t.split(","))) for t in a.swipe or []]
     holds = [tuple(map(int, t.split(","))) for t in a.hold or []]
-    sys.exit(run(a.seconds, a.version, int(a.switch, 16) if a.switch else None, pids, a.tcp, a.ccpa, a.dump, a.restart, tap, swipes, holds))
+    sys.exit(run(a.seconds, a.version, int(a.switch, 16) if a.switch else None, pids, a.tcp, a.ccpa, a.dump, a.restart, tap, swipes, holds, a.res))

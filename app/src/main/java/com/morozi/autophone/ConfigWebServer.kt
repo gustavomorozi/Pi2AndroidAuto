@@ -134,8 +134,8 @@ ${CarWifi.setupNetwork?.let { "<div class=\"msg\">Wi‑Fi de configuração ativ
 <label>Porta em que o Pi escuta<input name="listen_port" type="number" value="${s.listenPort}"></label>
 <label>Resolução máxima do vídeo
 <select name="max_height">
-<option value="480"${sel(s.maxVideoHeight == 480)}>480p</option>
-<option value="720"${sel(s.maxVideoHeight == 720)}>720p (recomendado no Pi 5)</option>
+<option value="480"${sel(s.maxVideoHeight == 480)}>480p (recomendado: 30 fps)</option>
+<option value="720"${sel(s.maxVideoHeight == 720)}>720p (mais nítido, ~18 fps no Pi 5)</option>
 <option value="1080"${sel(s.maxVideoHeight == 1080)}>1080p</option>
 </select></label>
 <label>Qualidade do vídeo

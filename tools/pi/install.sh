@@ -354,6 +354,14 @@ if [ ${#changed[@]} -gt 0 ]; then
     a shell 'chmod 755 /system/bin/morozi_*.sh; sync'
 fi
 
+# The Android TV screensaver starts after a while without a remote press and
+# covers the picture the car shows (seen while a video played); the Pi is a car
+# screen, so it stays off.
+if [ "$(a shell settings get secure screensaver_enabled | tr -d '\r')" != 0 ]; then
+    step "Turning the screensaver off (it covered the car display)"
+    a shell "settings put secure screensaver_enabled 0; settings put secure screensaver_activate_on_sleep 0"
+fi
+
 if [ "$(a shell settings get global restricted_networking_mode | tr -d '\r')" != 0 ]; then
     step "Letting the app use the network"
     a shell settings put global restricted_networking_mode 0

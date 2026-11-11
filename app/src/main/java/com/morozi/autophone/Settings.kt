@@ -41,7 +41,10 @@ class Settings(context: Context) {
 
     /** Upper bound on the video height we encode: 480, 720 or 1080. */
     var maxVideoHeight: Int
-        get() = prefs.getInt(KEY_MAX_HEIGHT, 720)
+        // 480 by default: mirroring a moving screen, the Pi 5's software encoder
+        // keeps 30 fps at 800x480 but only ~18 fps at 1280x720 (measured
+        // 2026-11-11), and smooth beats sharp while driving.
+        get() = prefs.getInt(KEY_MAX_HEIGHT, 480)
         set(v) = prefs.edit().putInt(KEY_MAX_HEIGHT, v).apply()
 
     val maxVideoPixels: Int get() = maxVideoHeight * maxVideoHeight * 16 / 9
