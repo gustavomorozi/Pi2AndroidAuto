@@ -73,7 +73,8 @@ Ligue o Pi à rede e ative a depuração USB/ADB. Nos exemplos, o Pi está em
    - o Pi só reinicia quando um arquivo de sistema mudou. Se não mudou, o
      script só reinicia o servidor de tela.
 
-   `--no-build` usa o APK já compilado. Sem endereço, o script usa o Pi no USB
+   `--no-build` usa o APK já compilado. O script também instala o SmartTube (cliente
+   de YouTube para Android TV) se faltar; `--no-smarttube` pula. Sem endereço, o script usa o Pi no USB
    ou o último IP (ele mostra e guarda o IP no fim).
 
    O `install.sh` precisa de **Rooted debugging** ligado no Pi (*Configurações →
@@ -238,7 +239,8 @@ Put the Pi on your network and turn on USB/ADB debugging. The examples use
    - the Pi reboots only when a system file changed. Otherwise the script
      just restarts the screen server.
 
-   `--no-build` uses the APK already built. With no address the script uses the
+   `--no-build` uses the APK already built. The script also installs SmartTube (YouTube
+   client for Android TV) if missing; `--no-smarttube` skips it. With no address the script uses the
    Pi on USB, or the last address (it shows and remembers the IP at the end).
 
    `install.sh` needs **Rooted debugging** on the Pi (*Settings → System →

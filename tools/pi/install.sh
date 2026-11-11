@@ -2,7 +2,7 @@
 # Installs Pi2AndroidAuto on the Pi in one go: builds the app, installs it,
 # the system files from tools/pi and the CarLink app, then reboots the Pi.
 #
-#   tools/pi/install.sh [--no-build] [--no-carlink] [--update-carlink] [--install-gapps] [pi-address]
+#   tools/pi/install.sh [--no-build] [--no-carlink] [--no-smarttube] [--update-carlink] [--install-gapps] [pi-address]
 #   e.g. tools/pi/install.sh 192.168.0.200
 #
 # --no-build installs the APK already built instead of building it again.
@@ -33,6 +33,7 @@ apk="$repo/app/build/outputs/apk/debug/app-debug.apk"
 build=1
 carlink=1
 update_carlink=0
+smarttube=1
 gapps=0
 carlink_pkg=com.carlink.app
 while [ $# -gt 0 ]; do
@@ -40,6 +41,7 @@ while [ $# -gt 0 ]; do
         --no-build) build=0 ;;
         --no-carlink) carlink=0 ;;
         --update-carlink) update_carlink=1 ;;
+        --no-smarttube) smarttube=0 ;;
         --install-gapps) gapps=1 ;;
         -*) echo "unknown option $1" >&2; exit 2 ;;
         *) break ;;
@@ -225,6 +227,31 @@ elif [ "$carlink" = 1 ]; then
         fi
     fi
     rm -rf "$dl"
+fi
+
+# SmartTube (https://github.com/yuliskov/SmartTube, open-source YouTube client
+# for Android TV): latest stable arm64 release from GitHub, installed only when
+# missing (it updates itself). The release publishes no checksum, so the zip
+# integrity is checked and the SHA-256 is printed.
+if [ "$smarttube" = 1 ]; then
+    if a shell pm path org.smarttube.stable >/dev/null 2>&1; then
+        step "SmartTube already installed; left as it is"
+    else
+        step "Installing SmartTube (latest stable, arm64)"
+        st="$(mktemp -d)"
+        if curl -fsSL --retry 3 -o "$(local_path "$st/rel.json")" https://api.github.com/repos/yuliskov/SmartTube/releases/latest; then
+            url="$(grep -o 'https://[^"]*stable_[0-9.]*_arm64-v8a\.apk' "$st/rel.json" | head -1 || true)"
+        else
+            url=""
+        fi
+        if [ -n "$url" ] && curl -fsSL --retry 3 -o "$(local_path "$st/app.apk")" "$url" && unzip -tq "$st/app.apk" >/dev/null; then
+            echo "    $(basename "$url")  sha256 $(sha256sum "$st/app.apk" | cut -c1-16)..."
+            a install -r "$(local_path "$st/app.apk")" || echo "    SmartTube not installed; skipped"
+        else
+            echo "    could not download SmartTube; skipped"
+        fi
+        rm -rf "$st"
+    fi
 fi
 
 tmp="$(mktemp -d)"
