@@ -31,6 +31,7 @@ class TapAssistService : AccessibilityService() {
     private var controls: CarControls? = null
 
     override fun onServiceConnected() {
+        CarVolume.load(this)
         controls = CarControls(this)
         instance = this
         Log.i(TAG, "connected")

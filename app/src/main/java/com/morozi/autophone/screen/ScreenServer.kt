@@ -63,6 +63,7 @@ object ScreenServer {
             val height = input.readInt()
             val fps = input.readInt()
             val bitrate = input.readInt()
+            val audioRate = input.readInt()
             val screen = Display.size()
             // The screen is scaled to fit inside the video, keeping its shape;
             // the rest is black. Touches are mapped back through this box.
@@ -92,10 +93,17 @@ object ScreenServer {
             val mirror = Display.mirror("morozi-car", width, height, relay.awaitInputSurface())
 
             val touchThread = thread(name = "screen-touch") { readTouches(fit, screen) }
+            // What Android plays goes to the car too (its media audio channel).
+            val audio = if (audioRate > 0) {
+                AudioCapture(audioRate) { pts, pcm -> runCatching { write(ScreenProtocol.AUDIO, pts, pcm) } }
+            } else null
+            val audioThread = audio?.let { thread(name = "screen-audio") { it.run() } }
             try {
                 drain(codec)
             } finally {
                 running = false
+                audio?.stop()
+                audioThread?.join(500)
                 relay.stop()
                 relayThread.join(1000)
                 runCatching { mirror.release() }
@@ -142,11 +150,23 @@ object ScreenServer {
                 codec.releaseOutputBuffer(index, false)
                 if (data.isEmpty()) continue
                 val config = info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG != 0
-                output.writeByte(if (config) ScreenProtocol.CODEC_CONFIG else ScreenProtocol.FRAME)
-                output.writeLong(info.presentationTimeUs)
-                output.writeInt(data.size)
-                output.write(data)
-                output.flush()
+                write(if (config) ScreenProtocol.CODEC_CONFIG else ScreenProtocol.FRAME, info.presentationTimeUs, data)
+            }
+        }
+
+        /** One message to the app; the video and audio threads both write. */
+        private fun write(type: Int, ptsUs: Long, data: ByteArray) {
+            try {
+                synchronized(output) {
+                    output.writeByte(type)
+                    output.writeLong(ptsUs)
+                    output.writeInt(data.size)
+                    output.write(data)
+                    output.flush()
+                }
+            } catch (e: java.io.IOException) {
+                running = false
+                throw e
             }
         }
     }

@@ -79,6 +79,9 @@ private const val ACK_WAIT_SECONDS = 2L
 /** PCM per audio message: ~42 ms of 48 kHz stereo 16-bit. */
 private const val AUDIO_CHUNK_BYTES = 8192
 
+/** ~1 s of sound waiting for the car before the oldest is dropped. */
+private const val AUDIO_QUEUE_CHUNKS = 24
+
 /** Keeps each frame's TLS record under the 16 KiB record limit. */
 private const val MAX_FRAME_PLAINTEXT = 16000
 
@@ -450,9 +453,31 @@ class AapSession(
         // V2: the real Android TV screen from the privileged screen server, if
         // it is running; otherwise the V1 test pattern so the car still shows
         // something.
+        // V4: what Android plays goes to the car's media audio channel. Sent
+        // from its own thread: a send waits for the car's ACKs and must not
+        // hold up the video. If the car falls behind, the oldest sound is dropped.
+        val audioOut = audioStream
+        val audioQueue = java.util.concurrent.LinkedBlockingQueue<ByteArray>(AUDIO_QUEUE_CHUNKS)
+        val audioSender = if (audioOut == null) null else Thread({
+            try {
+                while (running) audioOut.send(MediaMessage.DATA, audioQueue.take())
+            } catch (e: Exception) {
+                // interrupted at the end of the session, or the link is gone
+            }
+        }, "aap-audio")
+        val onAudio: (Long, ByteArray) -> Unit = { timestampUs, pcm ->
+            com.morozi.autophone.screen.CarVolume.apply(pcm)
+            val body = ByteBuffer.allocate(8 + pcm.size).putLong(timestampUs).put(pcm).array()
+            if (!audioQueue.offer(body)) {
+                audioQueue.poll()
+                audioQueue.offer(body)
+            }
+        }
         val client = com.morozi.autophone.screen.ScreenClient.connect(
-            config.width, config.height, config.fps, SCREEN_BITRATE, onCodecConfig, onFrame
+            config.width, config.height, config.fps, SCREEN_BITRATE,
+            if (audioOut != null) audioSampleRate else 0, onCodecConfig, onFrame, onAudio
         )
+        if (client != null) audioSender?.start()
         screenClient = client
         val source = if (client == null) VideoSource(
             width = config.width, height = config.height, fps = config.fps,
@@ -482,6 +507,7 @@ class AapSession(
         if (client != null) client.run() else source?.run()
         stopVideo()
         screenClient = null
+        audioSender?.interrupt()
         listener.interrupt()
     }
 

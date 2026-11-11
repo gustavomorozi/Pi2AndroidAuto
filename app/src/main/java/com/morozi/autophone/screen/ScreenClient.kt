@@ -19,8 +19,10 @@ class ScreenClient private constructor(
     private val height: Int,
     private val fps: Int,
     private val bitrate: Int,
+    private val audioRate: Int,
     private val onCodecConfig: (ByteArray) -> Unit,
-    private val onFrame: (timestampUs: Long, data: ByteArray) -> Unit
+    private val onFrame: (timestampUs: Long, data: ByteArray) -> Unit,
+    private val onAudio: (timestampUs: Long, pcm: ByteArray) -> Unit
 ) {
     private val output = DataOutputStream(socket.outputStream)
     @Volatile private var running = true
@@ -29,6 +31,7 @@ class ScreenClient private constructor(
         synchronized(output) {
             output.writeByte(ScreenProtocol.START)
             output.writeInt(width); output.writeInt(height); output.writeInt(fps); output.writeInt(bitrate)
+            output.writeInt(audioRate)
             output.flush()
         }
         val input = DataInputStream(socket.inputStream.buffered())
@@ -41,6 +44,7 @@ class ScreenClient private constructor(
                 input.readFully(data)
                 when (type) {
                     ScreenProtocol.CODEC_CONFIG -> onCodecConfig(data)
+                    ScreenProtocol.AUDIO -> onAudio(pts, data)
                     ScreenProtocol.FRAME -> {
                         onFrame(pts, data)
                         if (++frames % (fps * 5) == 0) Log.i(TAG, "Sent $frames screen frames")
@@ -79,13 +83,14 @@ class ScreenClient private constructor(
     companion object {
         /** Connects to the screen server, or returns null if it isn't running. */
         fun connect(
-            width: Int, height: Int, fps: Int, bitrate: Int,
+            width: Int, height: Int, fps: Int, bitrate: Int, audioRate: Int,
             onCodecConfig: (ByteArray) -> Unit,
-            onFrame: (timestampUs: Long, data: ByteArray) -> Unit
+            onFrame: (timestampUs: Long, data: ByteArray) -> Unit,
+            onAudio: (timestampUs: Long, pcm: ByteArray) -> Unit
         ): ScreenClient? = runCatching {
             val socket = LocalSocket()
             socket.connect(LocalSocketAddress(ScreenProtocol.SOCKET_NAME, LocalSocketAddress.Namespace.ABSTRACT))
-            ScreenClient(socket, width, height, fps, bitrate, onCodecConfig, onFrame)
+            ScreenClient(socket, width, height, fps, bitrate, audioRate, onCodecConfig, onFrame, onAudio)
         }.onFailure { Log.i(TAG, "screen server not available: ${it.message}") }.getOrNull()
     }
 }

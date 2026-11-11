@@ -372,6 +372,8 @@ def run(seconds, version, switch_pid=None, pids=(0x2D00, 0x2D01), tcp=None, ccpa
     link.send_plain(CONTROL, AUTH_COMPLETE, pb_varint(1, 0))
 
     frames = 0
+    audio_chunks = 0
+    audio_peak = 0
     end = time.time() + seconds
     next_ping = time.time() + 1
     restart_at = time.time() + seconds / 2 if restart else None
@@ -450,6 +452,16 @@ def run(seconds, version, switch_pid=None, pids=(0x2D00, 0x2D01), tcp=None, ccpa
         elif ch == 1 and mid == 0x8002:  # key binding request on the input channel
             log(f"<- KEY_BINDING_REQUEST {len(body)}B")
             link.send_enc(ch, 0x8003, pb_varint(1, 0))
+        elif mid in (MEDIA_DATA, MEDIA_CODEC_CONFIG) and ch != VIDEO_CHANNEL:
+            # Media audio: 8-byte timestamp, then PCM 16-bit LE. Count it apart
+            # from video and keep the loudest sample, to tell sound from silence.
+            audio_chunks += 1
+            pcm = body[8:]
+            for i in range(0, len(pcm) - 1, 64):
+                audio_peak = max(audio_peak, abs(int.from_bytes(pcm[i:i + 2], "little", signed=True)))
+            link.send_enc(ch, MEDIA_ACK, pb_varint(1, 0) + pb_varint(2, 1))
+            if audio_chunks in (1, 10) or audio_chunks % 100 == 0:
+                log(f"<- audio message #{audio_chunks} ({len(body)}B, peak {audio_peak})")
         elif mid in (MEDIA_DATA, MEDIA_CODEC_CONFIG):
             frames += 1
             if dump and ch == VIDEO_CHANNEL:
@@ -460,7 +472,7 @@ def run(seconds, version, switch_pid=None, pids=(0x2D00, 0x2D01), tcp=None, ccpa
                 log(f"<- video message #{frames} ({len(body)}B)")
         else:
             log(f"<- ch{ch} id=0x{mid:x} {len(body)}B {body[:24].hex()}")
-    log(f"RESULT: TLS ok, {frames} video messages in {seconds}s")
+    log(f"RESULT: TLS ok, {frames} video messages, {audio_chunks} audio messages (peak {audio_peak}) in {seconds}s")
     return 0
 
 

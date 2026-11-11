@@ -116,6 +116,10 @@ class CarControls(private val service: AccessibilityService) {
             // Android TV has no recents screen (GLOBAL_ACTION_RECENTS does
             // nothing there), so Abas is our own panel of recent apps.
             addView(item("❐", "Abas") { openTabs() })
+            // V4: volume of the sound sent to the car; the menu stays open.
+            val level = text("${CarVolume.percent}%", buttonSize * 0.17f)
+            addView(volumeItem("−", text("Vol", buttonSize * 0.17f), level, -CarVolume.STEP))
+            addView(volumeItem("+", level, level, CarVolume.STEP))
         }
         // Open toward the middle of the screen: right of the button on the left
         // half, left of it on the right half (END gravity counts from the right).
@@ -144,6 +148,16 @@ class CarControls(private val service: AccessibilityService) {
             closeMenu()
             action()
         }
+    }
+
+    /** A volume step: [caption] goes under [icon]; [level] is refreshed with the new value. */
+    private fun volumeItem(icon: String, caption: TextView, level: TextView, delta: Int) = LinearLayout(service).apply {
+        orientation = LinearLayout.VERTICAL
+        gravity = Gravity.CENTER
+        setPadding(gap, 0, gap, 0)
+        addView(text(icon, buttonSize * 0.42f))
+        addView(caption)
+        setOnClickListener { level.text = "${CarVolume.adjust(service, delta)}%" }
     }
 
     private var tabs: View? = null
