@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "morozi-auto-phone"
+rootProject.name = "Pi2AndroidAuto"
 include(":app")

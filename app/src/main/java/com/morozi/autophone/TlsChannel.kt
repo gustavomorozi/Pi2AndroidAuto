@@ -236,7 +236,7 @@ class TlsChannel(
                 .setSignaturePaddings(KeyProperties.SIGNATURE_PADDING_RSA_PKCS1, KeyProperties.SIGNATURE_PADDING_RSA_PSS)
                 .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE, KeyProperties.ENCRYPTION_PADDING_RSA_PKCS1)
                 .setRandomizedEncryptionRequired(false)
-                .setCertificateSubject(X500Principal("CN=Morozi Auto Phone"))
+                .setCertificateSubject(X500Principal("CN=Pi2AndroidAuto"))
                 .setCertificateSerialNumber(BigInteger.ONE)
                 .build()
             KeyPairGenerator.getInstance(KeyProperties.KEY_ALGORITHM_RSA, "AndroidKeyStore").apply {

@@ -362,7 +362,7 @@ class AapSession(
      */
     private fun sendServiceDiscoveryRequest(tls: TlsChannel) {
         val body = ProtoWriter()
-            .string(4, "Morozi Auto Phone")
+            .string(4, "Pi2AndroidAuto")
             .string(5, "Morozi")
             .toByteArray()
         sendMessage(CONTROL_CHANNEL, ControlMessage.SERVICE_DISCOVERY_REQUEST, body, tls)

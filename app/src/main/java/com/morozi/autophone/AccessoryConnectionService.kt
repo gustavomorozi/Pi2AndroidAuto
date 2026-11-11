@@ -219,7 +219,7 @@ class AccessoryConnectionService : Service() {
             )
         }
         return Notification.Builder(this, NOTIFICATION_CHANNEL_ID)
-            .setContentTitle("Morozi Auto Phone")
+            .setContentTitle("Pi2AndroidAuto")
             .setContentText(text)
             .setSmallIcon(android.R.drawable.stat_sys_data_bluetooth)
             .setOngoing(true)
