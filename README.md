@@ -75,6 +75,12 @@ Ligue o Pi à rede e ative a depuração USB/ADB. Nos exemplos, o Pi está em
 
    `--no-build` usa o APK já compilado.
 
+   Para ter a Play Store: `tools/pi/install.sh --install-gapps` (cabo USB do PC
+   no USB‑C do Pi e monitor HDMI ligado **antes** de ligar; **apaga o Pi**,
+   pede para digitar ERASE). Depois configure Wi‑Fi e conta Google na tela do Pi
+   e rode o `install.sh` de novo: ele reinstala tudo e mostra o **ID do Google
+   Services** para registrar em `google.com/android/uncertified`.
+
    O SSH do Pi fica ligado em todo boot (login só por chave). O script copia a
    chave para `~/.ssh/pi2androidauto_key` e mostra o comando:
    `ssh -i ~/.ssh/pi2androidauto_key root@192.168.0.200`.
@@ -228,6 +234,12 @@ Put the Pi on your network and turn on USB/ADB debugging. The examples use
      just restarts the screen server.
 
    `--no-build` uses the APK already built.
+
+   For the Play Store: `tools/pi/install.sh --install-gapps` (PC connected by USB
+   to the Pi's USB-C and an HDMI monitor plugged in **before** it boots; **erases
+   the Pi**, asks you to type ERASE). Then set up Wi-Fi and the Google account on
+   the Pi's screen and run `install.sh` again: it reinstalls everything and shows
+   the **Google Services ID** to register at `google.com/android/uncertified`.
 
    The Pi's SSH is on at every boot (key login only). The script copies the key
    to `~/.ssh/pi2androidauto_key` and shows the command:

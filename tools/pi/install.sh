@@ -2,10 +2,13 @@
 # Installs Pi2AndroidAuto on the Pi in one go: builds the app, installs it,
 # the system files from tools/pi and the CarLink app, then reboots the Pi.
 #
-#   tools/pi/install.sh [--no-build] [--no-carlink] [--update-carlink] [pi-address]
+#   tools/pi/install.sh [--no-build] [--no-carlink] [--update-carlink] [--install-gapps] [pi-address]
 #   e.g. tools/pi/install.sh 192.168.0.200
 #
 # --no-build installs the APK already built instead of building it again.
+# --install-gapps first installs the Google apps (Play Store) through TWRP and
+# factory-resets the Pi: see install_gapps.sh (asks you to type ERASE). Run
+# this script again afterwards to put everything back and get the Google ID.
 # Safe to run again: the app is updated in place (its settings are kept),
 # CarLink is left alone if already installed, only changed system files are
 # copied, and the Pi reboots only when one of them changed.
@@ -30,18 +33,21 @@ apk="$repo/app/build/outputs/apk/debug/app-debug.apk"
 build=1
 carlink=1
 update_carlink=0
+gapps=0
 carlink_pkg=com.carlink.app
 while [ $# -gt 0 ]; do
     case "$1" in
         --no-build) build=0 ;;
         --no-carlink) carlink=0 ;;
         --update-carlink) update_carlink=1 ;;
+        --install-gapps) gapps=1 ;;
         -*) echo "unknown option $1" >&2; exit 2 ;;
         *) break ;;
     esac
     shift
 done
 
+addr=""
 target=()
 if [ $# -ge 1 ]; then
     addr="$1"
@@ -62,12 +68,13 @@ ssh_hint() {
     local key="$HOME/.ssh/pi2androidauto_key" host="${addr%%:*}"
     if [ ! -f "$key" ]; then
         mkdir -p "$HOME/.ssh"
-        a root >/dev/null 2>&1 || true
-        sleep 3
-        if [ ${#target[@]} -gt 0 ]; then adb connect "${target[1]}" >/dev/null 2>&1 || true; fi
-        a wait-for-device
-        if a pull /data/ssh/ssh_host_ed25519_key "$(local_path "$key")" >/dev/null 2>&1; then
+        # Read as root through su, so adb does not have to restart as root.
+        if a shell "su 0 cat /data/ssh/ssh_host_ed25519_key" 2>/dev/null | tr -d '\r' > "$key.tmp" \
+            && grep -q 'BEGIN OPENSSH PRIVATE KEY' "$key.tmp"; then
+            mv "$key.tmp" "$key"
             chmod 600 "$key"
+        else
+            rm -f "$key.tmp"
         fi
     fi
     step "SSH"
@@ -86,14 +93,21 @@ ssh_hint() {
 gsf_id_hint() {
     a shell pm path com.google.android.gms >/dev/null 2>&1 || return 0
     local id
-    id="$(a shell "sqlite3 -readonly /data/user/0/com.google.android.gms/databases/gservices.db \"SELECT value FROM main WHERE name='android_id';\" 2>/dev/null" | tr -d '
-' | head -1)"
+    id="$(a shell "su 0 sqlite3 -readonly /data/user/0/com.google.android.gms/databases/gservices.db \"SELECT value FROM main WHERE name='android_id';\" 2>/dev/null || true" | tr -d '\r' | head -1 || true)"
+    step "Google Services ID of this Pi (for Play Store certification)"
     if [ -n "$id" ]; then
-        step "Google Services ID of this Pi (for Play Store certification)"
-        echo "    $id"
+        echo "    ID: $id"
         echo "    Register it at https://www.google.com/android/uncertified with the Google account signed in on the Pi."
+    else
+        echo "    not created yet: the Pi needs internet and the Google account signed in."
+        echo "    Do that on the Pi, then run this script again: it shows the ID."
     fi
 }
+
+if [ "$gapps" = 1 ]; then
+    bash "$here/install_gapps.sh"
+    exit 0
+fi
 
 if [ "$build" = 1 ]; then
     step "Building the app"
