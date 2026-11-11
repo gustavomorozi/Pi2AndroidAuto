@@ -55,6 +55,30 @@ local_path() { if command -v cygpath >/dev/null; then cygpath -m "$1"; else echo
 
 step() { echo "==> $*"; }
 
+# SSH is on at every boot (morozi_adbon.sh). Its login key is the Pi's own
+# ed25519 key; it is copied once to ~/.ssh/pi2androidauto_key (needs adb root),
+# and the command to use it is shown.
+ssh_hint() {
+    local key="$HOME/.ssh/pi2androidauto_key" host="${addr%%:*}"
+    if [ ! -f "$key" ]; then
+        mkdir -p "$HOME/.ssh"
+        a root >/dev/null 2>&1 || true
+        sleep 3
+        if [ ${#target[@]} -gt 0 ]; then adb connect "${target[1]}" >/dev/null 2>&1 || true; fi
+        a wait-for-device
+        if a pull /data/ssh/ssh_host_ed25519_key "$(local_path "$key")" >/dev/null 2>&1; then
+            chmod 600 "$key"
+        fi
+    fi
+    step "SSH"
+    if [ -f "$key" ]; then
+        echo "    ssh -i ~/.ssh/pi2androidauto_key root@${host:-<ip-do-pi>}"
+    else
+        echo "    key not copied yet (the Pi creates it on its first boot with SSH on). Then:"
+        echo "    adb root && adb pull /data/ssh/ssh_host_ed25519_key ~/.ssh/pi2androidauto_key"
+    fi
+}
+
 # With Google apps installed, shows the Pi's Google Services Framework ID: the
 # one to register at https://www.google.com/android/uncertified (signed in with
 # the same Google account as on the Pi) when Play Store says "not certified".
@@ -62,7 +86,8 @@ step() { echo "==> $*"; }
 gsf_id_hint() {
     a shell pm path com.google.android.gms >/dev/null 2>&1 || return 0
     local id
-    id="$(a shell "sqlite3 -readonly /data/user/0/com.google.android.gms/databases/gservices.db \"SELECT value FROM main WHERE name='android_id';\" 2>/dev/null" | tr -d '' | head -1)"
+    id="$(a shell "sqlite3 -readonly /data/user/0/com.google.android.gms/databases/gservices.db \"SELECT value FROM main WHERE name='android_id';\" 2>/dev/null" | tr -d '
+' | head -1)"
     if [ -n "$id" ]; then
         step "Google Services ID of this Pi (for Play Store certification)"
         echo "    $id"
@@ -189,10 +214,11 @@ if [ "$(a shell settings get global restricted_networking_mode | tr -d '\r')" !=
 fi
 
 if [ ${#changed[@]} -gt 0 ]; then
+    gsf_id_hint
+    ssh_hint
     step "Rebooting the Pi (system files changed)"
     a reboot
-    gsf_id_hint
-echo "Done. After boot, open Pi2AndroidAuto once on the Pi."
+    echo "Done. After boot, open Pi2AndroidAuto once on the Pi."
 else
     if [ "$app_updated" = 1 ]; then
         # The screen server runs code from the APK; restart it to load the new one.
@@ -200,5 +226,6 @@ else
         a shell 'setprop debug.morozi.screen 0; sleep 1; setprop debug.morozi.screen 1; am start -n com.morozi.autophone/.MainActivity >/dev/null'
     fi
     gsf_id_hint
+    ssh_hint
     echo "Done. No reboot needed."
 fi

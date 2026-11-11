@@ -75,6 +75,10 @@ Ligue o Pi à rede e ative a depuração USB/ADB. Nos exemplos, o Pi está em
 
    `--no-build` usa o APK já compilado.
 
+   O SSH do Pi fica ligado em todo boot (login só por chave). O script copia a
+   chave para `~/.ssh/pi2androidauto_key` e mostra o comando:
+   `ssh -i ~/.ssh/pi2androidauto_key root@192.168.0.200`.
+
    Ele também instala o [CarLink](https://github.com/F-e-n-y-x/CarLink), um
    projeto separado (AGPL‑3.0): com ele, um iPhone ou Android ligado nas
    portas USB‑A do Pi abre CarPlay ou Android Auto na tela do Pi. O script
@@ -224,6 +228,10 @@ Put the Pi on your network and turn on USB/ADB debugging. The examples use
      just restarts the screen server.
 
    `--no-build` uses the APK already built.
+
+   The Pi's SSH is on at every boot (key login only). The script copies the key
+   to `~/.ssh/pi2androidauto_key` and shows the command:
+   `ssh -i ~/.ssh/pi2androidauto_key root@192.168.0.200`.
 
    It also installs [CarLink](https://github.com/F-e-n-y-x/CarLink), a separate
    project (AGPL‑3.0): with it, an iPhone or Android phone plugged into the
