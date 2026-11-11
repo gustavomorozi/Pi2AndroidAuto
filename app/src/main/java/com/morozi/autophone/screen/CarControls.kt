@@ -111,11 +111,18 @@ class CarControls(private val service: AccessibilityService) {
                 setColor(PANEL)
                 setStroke(3, OUTLINE)
             }
-            addView(item("←", "Voltar") { service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK) })
+            addView(item("←", "Voltar") {
+                // Split screen: Back is for the app touched last, which the server knows.
+                if (SplitScreen.active) ScreenClient.active?.key(android.view.KeyEvent.KEYCODE_BACK, 1)
+                else service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK)
+            })
             addView(item("⌂", "Início") { service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME) })
             // Android TV has no recents screen (GLOBAL_ACTION_RECENTS does
             // nothing there), so Abas is our own panel of recent apps.
             addView(item("❐", "Abas") { openTabs() })
+            // Two apps side by side on the car (Android TV has no split screen).
+            if (SplitScreen.active) addView(item("▣", "Tela cheia") { SplitScreen.stop() })
+            else addView(item("◫", "Dividir") { openTabs(splitLeft = null, picking = true) })
             // V4: volume of the sound sent to the car; the menu stays open.
             val level = text("${CarVolume.percent}%", buttonSize * 0.17f)
             addView(volumeItem("−", text("Vol", buttonSize * 0.17f), level, -CarVolume.STEP))
@@ -167,10 +174,19 @@ class CarControls(private val service: AccessibilityService) {
         tabs = null
     }
 
-    /** A panel in the middle of the screen with the most recently used apps; tap one to open it. */
-    private fun openTabs() {
+    /**
+     * A panel in the middle of the screen with the most recently used apps; tap one to open it.
+     * With [picking] it chooses the two apps of the split screen instead: the
+     * first tap is the left app ([splitLeft] on the second round), the second the right one.
+     */
+    private fun openTabs(splitLeft: RecentApps.App? = null, picking: Boolean = false) {
         closeTabs()
-        val apps = RecentApps.list(service, TAB_COUNT)
+        val apps = RecentApps.list(service, TAB_COUNT).filter { it.pkg != splitLeft?.pkg }
+        val title = when {
+            !picking -> "Abas recentes"
+            splitLeft == null -> "Dividir: app da esquerda"
+            else -> "Dividir: app da direita"
+        }
         val iconSize = buttonSize * 7 / 10
         val panel = LinearLayout(service).apply {
             orientation = LinearLayout.VERTICAL
@@ -184,7 +200,7 @@ class CarControls(private val service: AccessibilityService) {
             val header = LinearLayout(service).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
-                addView(text("Abas recentes", buttonSize * 0.22f), LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+                addView(text(title, buttonSize * 0.22f), LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
                 addView(text("✕", buttonSize * 0.3f).apply {
                     setPadding(gap, 0, 0, 0)
                     setOnClickListener { closeTabs() }
@@ -209,8 +225,12 @@ class CarControls(private val service: AccessibilityService) {
                             })
                             setOnClickListener {
                                 closeTabs()
-                                runCatching { service.startActivity(app.intent) }
-                                    .onFailure { android.util.Log.w("TapAssist", "could not open ${app.label}", it) }
+                                when {
+                                    !picking -> runCatching { service.startActivity(app.intent) }
+                                        .onFailure { android.util.Log.w("TapAssist", "could not open ${app.label}", it) }
+                                    splitLeft == null -> openTabs(splitLeft = app, picking = true)
+                                    else -> SplitScreen.start(service, splitLeft.pkg, app.pkg)
+                                }
                             }
                         })
                     }

@@ -25,6 +25,10 @@ import java.nio.FloatBuffer
  *
  * [inputSurface] is what the virtual display should draw into. Everything GL
  * runs on the thread that calls [run].
+ *
+ * Split screen: between [startSplit] and [stopSplit] it draws two other
+ * textures side by side (left app | divider with a handle | right app, see
+ * [SplitLayout]) instead of the mirrored screen.
  */
 internal class FrameRelay(private val encoderSurface: Surface, private val width: Int, private val height: Int) {
 
@@ -50,6 +54,60 @@ internal class FrameRelay(private val encoderSurface: Surface, private val width
         running = false
     }
 
+    /** One app of the split screen: its own texture, drawn at its place in the video. */
+    private class Pane(val texture: Int, val surfaceTexture: SurfaceTexture, val surface: Surface, val x: Int, val width: Int) {
+        var lastStamp = -1L
+        var frames = 0
+    }
+
+    private class Split(val layout: SplitLayout, val left: Pane, val right: Pane)
+
+    /** Only touched on the GL thread. */
+    private var split: Split? = null
+    private val tasks = java.util.concurrent.ConcurrentLinkedQueue<Runnable>()
+
+    /**
+     * Starts drawing two apps side by side. Returns the surfaces the left and
+     * the right virtual display should draw into (sized as in [layout]).
+     */
+    fun startSplit(layout: SplitLayout): Pair<Surface, Surface> {
+        val task = java.util.concurrent.FutureTask {
+            releaseSplit()
+            val created = Split(
+                layout,
+                newPane(layout.leftX, layout.leftWidth, layout.height),
+                newPane(layout.rightX, layout.rightWidth, layout.height)
+            )
+            split = created
+            created.left.surface to created.right.surface
+        }
+        tasks.add(task)
+        return task.get(SPLIT_WAIT_MS, java.util.concurrent.TimeUnit.MILLISECONDS)
+    }
+
+    /** Back to the mirrored screen; the split surfaces are released (remove the displays first). */
+    fun stopSplit() {
+        val task = java.util.concurrent.FutureTask { releaseSplit() }
+        tasks.add(task)
+        runCatching { task.get(SPLIT_WAIT_MS, java.util.concurrent.TimeUnit.MILLISECONDS) }
+    }
+
+    private fun newPane(x: Int, paneWidth: Int, paneHeight: Int): Pane {
+        val id = newTexture()
+        val st = SurfaceTexture(id).apply { setDefaultBufferSize(paneWidth, paneHeight) }
+        return Pane(id, st, Surface(st), x, paneWidth)
+    }
+
+    private fun releaseSplit() {
+        val old = split ?: return
+        split = null
+        for (pane in listOf(old.left, old.right)) {
+            runCatching { pane.surface.release() }
+            runCatching { pane.surfaceTexture.release() }
+            GLES20.glDeleteTextures(1, intArrayOf(pane.texture), 0)
+        }
+    }
+
     fun run(fps: Int) {
         try {
             setUpEgl()
@@ -65,15 +123,24 @@ internal class FrameRelay(private val encoderSurface: Surface, private val width
         var drawn = 0
         try {
             while (running) {
+                while (true) (tasks.poll() ?: break).run()
                 // Latch the newest mirrored frame if there is one; otherwise
                 // the texture keeps the previous picture and we draw it again.
+                // (Also in split screen, so the mirror never backs up.)
                 surfaceTexture.updateTexImage()
                 if (surfaceTexture.timestamp != lastStamp) { lastStamp = surfaceTexture.timestamp; latched++ }
+                val panes = split
                 if (++drawn % (fps * 5) == 0) {
-                    android.util.Log.i("FrameRelay", "drawn $drawn, new screen frames $latched, gl error 0x${GLES20.glGetError().toString(16)}")
+                    val splitInfo = panes?.let { ", split frames left ${it.left.frames} right ${it.right.frames}" } ?: ""
+                    android.util.Log.i("FrameRelay", "drawn $drawn, new screen frames $latched$splitInfo, gl error 0x${GLES20.glGetError().toString(16)}")
                 }
-                surfaceTexture.getTransformMatrix(transform)
-                draw(transform)
+                clear()
+                if (panes == null) {
+                    surfaceTexture.getTransformMatrix(transform)
+                    draw(texture, transform, 0, 0, width, height)
+                } else {
+                    drawSplit(panes, transform)
+                }
                 EGLExt.eglPresentationTimeANDROID(display, eglSurface, System.nanoTime())
                 EGL14.eglSwapBuffers(display, eglSurface)
                 next += frameNs
@@ -108,15 +175,19 @@ internal class FrameRelay(private val encoderSurface: Surface, private val width
     }
 
     private fun setUpTexture() {
-        val ids = IntArray(1)
-        GLES20.glGenTextures(1, ids, 0)
-        texture = ids[0]
-        GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, texture)
-        GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
-        GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
+        texture = newTexture()
         surfaceTexture = SurfaceTexture(texture).apply { setDefaultBufferSize(width, height) }
         inputSurface = Surface(surfaceTexture)
         program = buildProgram()
+    }
+
+    private fun newTexture(): Int {
+        val ids = IntArray(1)
+        GLES20.glGenTextures(1, ids, 0)
+        GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, ids[0])
+        GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
+        GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
+        return ids[0]
     }
 
     private val quad: FloatBuffer = ByteBuffer.allocateDirect(16 * 4).order(ByteOrder.nativeOrder()).asFloatBuffer().apply {
@@ -125,10 +196,44 @@ internal class FrameRelay(private val encoderSurface: Surface, private val width
         position(0)
     }
 
-    private fun draw(transform: FloatArray) {
+    private fun clear() {
         GLES20.glViewport(0, 0, width, height)
         GLES20.glClearColor(0f, 0f, 0f, 1f)
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
+    }
+
+    /** The two apps, the divider between them and the "full screen" handle on it. */
+    private fun drawSplit(panes: Split, transform: FloatArray) {
+        val layout = panes.layout
+        // GL counts rows from the bottom of the video.
+        val bottom = height - layout.top - layout.height
+        for (pane in listOf(panes.left, panes.right)) {
+            pane.surfaceTexture.updateTexImage()
+            if (pane.surfaceTexture.timestamp != pane.lastStamp) { pane.lastStamp = pane.surfaceTexture.timestamp; pane.frames++ }
+            pane.surfaceTexture.getTransformMatrix(transform)
+            draw(pane.texture, transform, pane.x, bottom, pane.width, layout.height)
+        }
+        GLES20.glEnable(GLES20.GL_SCISSOR_TEST)
+        fill(layout.dividerX, bottom, layout.dividerWidth, layout.height, 0.35f, 0.38f, 0.42f)
+        // Handle: a green square with a dark middle, like a "maximize" button.
+        val size = layout.handleSize
+        val hx = layout.handleX
+        val hy = height - layout.handleY - size
+        val rim = maxOf(3, size / 8)
+        fill(hx, hy, size, size, 0.24f, 0.86f, 0.52f)
+        fill(hx + rim, hy + rim, size - 2 * rim, size - 2 * rim, 0.10f, 0.14f, 0.17f)
+        GLES20.glDisable(GLES20.GL_SCISSOR_TEST)
+    }
+
+    private fun fill(x: Int, y: Int, w: Int, h: Int, r: Float, g: Float, b: Float) {
+        GLES20.glScissor(x, y, w, h)
+        GLES20.glClearColor(r, g, b, 1f)
+        GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
+    }
+
+    /** Draws [texture] over the box at ([x], [y]) (GL window coordinates) of [w] x [h] pixels. */
+    private fun draw(texture: Int, transform: FloatArray, x: Int, y: Int, w: Int, h: Int) {
+        GLES20.glViewport(x, y, w, h)
         GLES20.glUseProgram(program)
         val pos = GLES20.glGetAttribLocation(program, "aPos")
         val uv = GLES20.glGetAttribLocation(program, "aUv")
@@ -177,6 +282,7 @@ internal class FrameRelay(private val encoderSurface: Surface, private val width
     }
 
     private fun release() {
+        runCatching { releaseSplit() }
         runCatching { inputSurface.release() }
         runCatching { surfaceTexture.release() }
         EGL14.eglMakeCurrent(display, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_CONTEXT)
@@ -187,5 +293,6 @@ internal class FrameRelay(private val encoderSurface: Surface, private val width
 
     private companion object {
         const val EGL_RECORDABLE_ANDROID = 0x3142
+        const val SPLIT_WAIT_MS = 2000L
     }
 }

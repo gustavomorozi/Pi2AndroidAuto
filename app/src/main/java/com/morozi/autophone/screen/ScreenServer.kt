@@ -53,6 +53,8 @@ object ScreenServer {
         }
     }
 
+    private val ROOT_TASK = Regex("""^RootTask id=(\d+) .*displayId=(\d+)""")
+
     /** One car session: encode the mirrored screen and apply the car's touches. */
     private class Session(private val socket: LocalSocket, private val touch: HidTouchscreen?, private val keys: HidKeyboard?) {
         private val input = DataInputStream(socket.inputStream)
@@ -94,6 +96,7 @@ object ScreenServer {
             }
             val mirror = Display.mirror("morozi-car", width, height, relay.awaitInputSurface())
 
+            this.relay = relay
             val touchThread = thread(name = "screen-touch") { readTouches(fit, screen) }
             // What Android plays goes to the car too (its media audio channel).
             val audio = if (audioRate > 0) {
@@ -106,6 +109,8 @@ object ScreenServer {
                 running = false
                 audio?.stop()
                 audioThread?.join(500)
+                // The car left: the two apps close with their displays.
+                runCatching { stopSplit(notify = false) }
                 relay.stop()
                 relayThread.join(1000)
                 runCatching { mirror.release() }
@@ -125,6 +130,10 @@ object ScreenServer {
                             val action = input.readUnsignedByte()
                             val x = input.readInt()
                             val y = input.readInt()
+                            if (split != null) {
+                                splitTouch(action, x, y)
+                                continue
+                            }
                             val (sx, sy) = fit.toScreen(x, y) ?: continue
                             when (action) {
                                 ScreenProtocol.ACTION_UP -> touch?.up()
@@ -135,14 +144,174 @@ object ScreenServer {
                         ScreenProtocol.KEY -> {
                             val code = input.readInt()
                             val repeat = input.readUnsignedByte().coerceIn(1, 12)
-                            pressKey(code, repeat)
+                            val side = split?.let { if (lastRight) it.right else it.left }
+                            if (side != null) {
+                                Log.i(TAG, "split key $code x$repeat -> display ${side.id}")
+                                for (i in 0 until repeat) DisplayInput.key(side.id, code)
+                            } else {
+                                pressKey(code, repeat)
+                            }
                         }
+                        ScreenProtocol.SPLIT_START -> {
+                            val left = input.readUTF()
+                            val right = input.readUTF()
+                            val percent = input.readUnsignedByte()
+                            runCatching { startSplit(fit, left, right, percent) }
+                                .onFailure { Log.e(TAG, "split screen failed", it) }
+                        }
+                        ScreenProtocol.SPLIT_STOP -> stopSplit(notify = true)
                         else -> return
                     }
                 }
             } catch (e: Exception) {
                 running = false
             }
+        }
+
+        // ---- Split screen: two apps side by side, each on its own virtual display.
+
+        private class Side(val display: android.hardware.display.VirtualDisplay, val x: Int, val width: Int, val component: String) {
+            val id: Int get() = display.display.displayId
+        }
+
+        private class Split(val layout: SplitLayout, val left: Side, val right: Side)
+
+        private var relay: FrameRelay? = null
+        @Volatile private var split: Split? = null
+        /** The app touched last: Back (and any other key) goes to it. */
+        private var lastRight = false
+        /** The app the finger went down on, until it lifts. */
+        private var gestureSide: Side? = null
+        private var gestureOnHandle = false
+        private var gestureDownAt = 0L
+
+        private fun startSplit(fit: ScreenFit, left: String, right: String, leftPercent: Int) {
+            val relay = relay ?: return
+            stopSplit(notify = false)
+            touch?.up()
+            val layout = SplitLayout.of(fit, leftPercent)
+            val (leftSurface, rightSurface) = relay.startSplit(layout)
+            var leftDisplay: android.hardware.display.VirtualDisplay? = null
+            val created = try {
+                leftDisplay = Display.own("morozi-split-left", layout.leftWidth, layout.height, layout.density, leftSurface)
+                val rightDisplay = Display.own("morozi-split-right", layout.rightWidth, layout.height, layout.density, rightSurface)
+                Split(layout, Side(leftDisplay, layout.leftX, layout.leftWidth, left), Side(rightDisplay, layout.rightX, layout.rightWidth, right))
+            } catch (e: Exception) {
+                // Never leave the car on two empty halves.
+                runCatching { leftDisplay?.release() }
+                relay.stopSplit()
+                throw e
+            }
+            lastRight = false
+            gestureSide = null
+            gestureOnHandle = false
+            split = created
+            Log.i(TAG, "split on: $left on display ${created.left.id} (${layout.leftWidth}x${layout.height}), " +
+                "$right on display ${created.right.id} (${layout.rightWidth}x${layout.height}), ${layout.density} dpi")
+            runCatching { write(ScreenProtocol.SPLIT_STATE, 0, byteArrayOf(1)) }
+            thread(name = "screen-split-apps") {
+                // Right first, so the left app ends up with the focus (keys go to it until a touch).
+                startOn(created.right.id, right)
+                startOn(created.left.id, left)
+            }
+        }
+
+        /**
+         * Opens activity [component] ("package/class") on the display, from
+         * scratch. Tasks the app already has are closed first: left open, the
+         * app brought its old task on the main screen to the front and the
+         * half stayed empty; moved over as they were, an app that keeps its
+         * own layout scale (SmartTube) stayed drawn for the other display.
+         */
+        private fun startOn(displayId: Int, component: String) {
+            runCatching {
+                val pkg = component.substringBefore('/')
+                val closed = openTasksOf(pkg).map { (rootTask, _) ->
+                    shell("am", "stack", "remove", rootTask.toString())
+                    rootTask
+                }
+                val text = shell(
+                    "am", "start", "--display", displayId.toString(), "--windowingMode", "1",
+                    "-a", "android.intent.action.MAIN", "-n", component
+                ).replace('\n', ' ')
+                Log.i(TAG, "start $component on display $displayId (closed tasks $closed): $text")
+            }.onFailure { Log.w(TAG, "could not start $component on display $displayId", it) }
+        }
+
+        /** Root task id and display id of every open task of [pkg], read from `am stack list`. */
+        private fun openTasksOf(pkg: String): List<Pair<Int, Int>> {
+            val found = mutableListOf<Pair<Int, Int>>()
+            var current: Pair<Int, Int>? = null
+            for (line in shell("am", "stack", "list").lines()) {
+                val root = ROOT_TASK.find(line)
+                if (root != null) {
+                    current = root.groupValues[1].toInt() to root.groupValues[2].toInt()
+                } else if (current != null && line.contains(": $pkg/") && line.trimStart().startsWith("taskId=")) {
+                    found.add(current)
+                    current = null
+                }
+            }
+            return found
+        }
+
+        private fun shell(vararg command: String): String {
+            val process = ProcessBuilder(*command).redirectErrorStream(true).start()
+            val text = process.inputStream.bufferedReader().readText().trim()
+            process.waitFor()
+            return text
+        }
+
+        private fun stopSplit(notify: Boolean) {
+            val old = split ?: return
+            split = null
+            runCatching { old.left.display.release() }
+            runCatching { old.right.display.release() }
+            relay?.stopSplit()
+            Log.i(TAG, "split off")
+            if (!notify) return
+            runCatching { write(ScreenProtocol.SPLIT_STATE, 0, byteArrayOf(0)) }
+            // "Full screen": the displays took their apps with them, so the
+            // app touched last is opened again, on the whole screen this time.
+            val component = (if (lastRight) old.right else old.left).component
+            thread(name = "screen-split-apps") {
+                runCatching {
+                    Log.i(TAG, "full screen: ${shell("am", "start", "-a", "android.intent.action.MAIN", "-n", component).replace('\n', ' ')}")
+                }
+            }
+        }
+
+        /** A car touch in split screen: to the app under it, or the handle that ends the split. */
+        private fun splitTouch(action: Int, x: Int, y: Int) {
+            val current = split ?: return
+            val layout = current.layout
+            if (action == ScreenProtocol.ACTION_DOWN) {
+                gestureOnHandle = layout.onHandle(x, y)
+                gestureSide = if (gestureOnHandle) null else if (layout.isRight(x)) current.right else current.left
+                gestureDownAt = android.os.SystemClock.uptimeMillis()
+                if (!gestureOnHandle) lastRight = gestureSide === current.right
+            }
+            if (gestureOnHandle) {
+                if (action == ScreenProtocol.ACTION_UP) {
+                    gestureOnHandle = false
+                    if (layout.onHandle(x, y)) stopSplit(notify = true)
+                }
+                return
+            }
+            val side = gestureSide ?: return
+            val px = (x - side.x).coerceIn(0, side.width - 1)
+            val py = (y - layout.top).coerceIn(0, layout.height - 1)
+            val motion = when (action) {
+                ScreenProtocol.ACTION_DOWN -> android.view.MotionEvent.ACTION_DOWN
+                ScreenProtocol.ACTION_UP -> android.view.MotionEvent.ACTION_UP
+                ScreenProtocol.ACTION_CANCEL -> android.view.MotionEvent.ACTION_CANCEL
+                else -> android.view.MotionEvent.ACTION_MOVE
+            }
+            val ok = runCatching { DisplayInput.touch(side.id, motion, px, py, gestureDownAt) }
+                .onFailure { Log.w(TAG, "split touch failed", it) }.getOrDefault(false)
+            if (motion != android.view.MotionEvent.ACTION_MOVE) {
+                Log.i(TAG, "split touch action $motion at ($px, $py) -> display ${side.id} ${if (side === current.right) "right" else "left"} ($ok)")
+            }
+            if (motion == android.view.MotionEvent.ACTION_UP || motion == android.view.MotionEvent.ACTION_CANCEL) gestureSide = null
         }
 
         /**

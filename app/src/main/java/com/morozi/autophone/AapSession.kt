@@ -574,7 +574,9 @@ class AapSession(
             // does not click under it); the rest of that gesture is not sent.
             if (action == TOUCH_ACTION_DOWN) {
                 gestureCancelled = false
-                gestureSuppressed = leaveToAssist(x.toInt(), y.toInt())
+                // Split screen: the two apps are not on the main screen, so
+                // the assistant (which reads the main screen) stays out of it.
+                gestureSuppressed = !screen.splitActive && leaveToAssist(x.toInt(), y.toInt())
             }
             if (!gestureCancelled && !gestureSuppressed && (pointers.size >= 2 || action == TOUCH_ACTION_POINTER_DOWN)) {
                 gestureCancelled = true
@@ -636,6 +638,12 @@ class AapSession(
                     kotlin.math.abs(x - tapDownX) < TAP_SLOP_PX && kotlin.math.abs(y - tapDownY) < TAP_SLOP_PX
                 val service = com.morozi.autophone.screen.TapAssistService.instance
                 val config = videoConfig
+                // Split screen: a short two-finger tap is Back in the app touched
+                // last (the server knows which); nothing else is assisted there.
+                screenClient?.takeIf { it.splitActive }?.let { screen ->
+                    if (tapFingers >= 2 && now - tapDownAt < TAP_MAX_MS) screen.key(android.view.KeyEvent.KEYCODE_BACK, 1)
+                    return
+                }
                 if (service == null || config == null) return
                 // V3: a short two-finger tap anywhere is Back.
                 if (tapFingers >= 2 && now - tapDownAt < TAP_MAX_MS) {

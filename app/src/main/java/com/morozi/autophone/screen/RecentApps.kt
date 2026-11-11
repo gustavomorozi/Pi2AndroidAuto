@@ -15,7 +15,7 @@ import android.graphics.drawable.Drawable
  */
 internal object RecentApps {
 
-    data class App(val label: String, val icon: Drawable, val intent: Intent)
+    data class App(val label: String, val icon: Drawable, val intent: Intent, val pkg: String)
 
     private const val LOOKBACK_MS = 7L * 24 * 60 * 60 * 1000
 
@@ -44,8 +44,15 @@ internal object RecentApps {
         return ordered.take(max).mapNotNull { pkg ->
             val intent = pm.getLeanbackLaunchIntentForPackage(pkg) ?: pm.getLaunchIntentForPackage(pkg) ?: return@mapNotNull null
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            App(label(context, pkg), pm.getApplicationIcon(pkg), intent)
+            App(label(context, pkg), pm.getApplicationIcon(pkg), intent, pkg)
         }
+    }
+
+    /** The activity that opens [pkg], as "package/class" (for split screen), or null. */
+    fun launchComponent(context: Context, pkg: String): String? {
+        val pm = context.packageManager
+        val intent = pm.getLeanbackLaunchIntentForPackage(pkg) ?: pm.getLaunchIntentForPackage(pkg)
+        return intent?.component?.flattenToString()
     }
 
     private fun label(context: Context, pkg: String): String = runCatching {

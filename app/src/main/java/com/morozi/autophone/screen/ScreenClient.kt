@@ -27,7 +27,12 @@ class ScreenClient private constructor(
     private val output = DataOutputStream(socket.outputStream)
     @Volatile private var running = true
 
+    /** True while the server shows two apps side by side instead of the mirrored screen. */
+    @Volatile var splitActive = false
+        private set
+
     fun run() {
+        active = this
         synchronized(output) {
             output.writeByte(ScreenProtocol.START)
             output.writeInt(width); output.writeInt(height); output.writeInt(fps); output.writeInt(bitrate)
@@ -45,6 +50,10 @@ class ScreenClient private constructor(
                 when (type) {
                     ScreenProtocol.CODEC_CONFIG -> onCodecConfig(data)
                     ScreenProtocol.AUDIO -> onAudio(pts, data)
+                    ScreenProtocol.SPLIT_STATE -> {
+                        splitActive = data.firstOrNull()?.toInt() == 1
+                        Log.i(TAG, "split screen ${if (splitActive) "on" else "off"}")
+                    }
                     ScreenProtocol.FRAME -> {
                         onFrame(pts, data)
                         if (++frames % (fps * 5) == 0) Log.i(TAG, "Sent $frames screen frames")
@@ -82,8 +91,32 @@ class ScreenClient private constructor(
         }
     }
 
+    /** Two apps side by side ("package/class" each); the server answers with SPLIT_STATE. */
+    fun split(left: String, right: String, leftPercent: Int) {
+        runCatching {
+            synchronized(output) {
+                output.writeByte(ScreenProtocol.SPLIT_START)
+                output.writeUTF(left); output.writeUTF(right)
+                output.writeByte(leftPercent)
+                output.flush()
+            }
+        }
+    }
+
+    /** Back to the mirrored screen. */
+    fun splitStop() {
+        runCatching {
+            synchronized(output) {
+                output.writeByte(ScreenProtocol.SPLIT_STOP)
+                output.flush()
+            }
+        }
+    }
+
     fun stop() {
         running = false
+        splitActive = false
+        if (active === this) active = null
         // close() alone does not wake a read blocked in another thread on a
         // LocalSocket; shutting the input down does (the session otherwise
         // lingered until the next car connected).
@@ -93,6 +126,10 @@ class ScreenClient private constructor(
     }
 
     companion object {
+        /** The client of the car session in progress, if the car shows the screen. */
+        @Volatile var active: ScreenClient? = null
+            private set
+
         /** Connects to the screen server, or returns null if it isn't running. */
         fun connect(
             width: Int, height: Int, fps: Int, bitrate: Int, audioRate: Int,

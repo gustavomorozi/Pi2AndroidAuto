@@ -13,12 +13,30 @@ private const val TAG = "ConfigReceiver"
  *   adb shell am broadcast -a com.morozi.autophone.CONFIGURE -n com.morozi.autophone/.ConfigReceiver \
  *       --es ssid "CarWifi" --es password "..." --es mode connect --es host 192.168.1.1 --ei port 5277
  *
+ * Split screen on the car, for tests (two apps side by side, then back):
+ *
+ *   adb shell am broadcast -a com.morozi.autophone.SPLIT -n com.morozi.autophone/.ConfigReceiver \
+ *       --es left org.smarttube.stable --es right com.android.documentsui [--ei percent 50]
+ *   adb shell am broadcast -a com.morozi.autophone.SPLIT -n com.morozi.autophone/.ConfigReceiver --ez stop true
+ *
  * Only the shell (ADB) and the system can send it: the manifest guards it with
  * the DUMP permission, which ordinary apps cannot hold.
  */
 class ConfigReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
+        if (intent.action == ACTION_SPLIT) {
+            if (intent.getBooleanExtra("stop", false)) {
+                com.morozi.autophone.screen.SplitScreen.stop()
+            } else {
+                val ok = com.morozi.autophone.screen.SplitScreen.start(
+                    context, intent.getStringExtra("left").orEmpty(), intent.getStringExtra("right").orEmpty(),
+                    intent.getIntExtra("percent", 50)
+                )
+                Log.i(TAG, "Split screen requested: ${if (ok) "sent" else "not possible"}")
+            }
+            return
+        }
         if (intent.action != ACTION_CONFIGURE) return
         val s = Settings(context)
         intent.getStringExtra("ssid")?.let { s.carWifiSsid = it }
@@ -38,5 +56,6 @@ class ConfigReceiver : BroadcastReceiver() {
 
     companion object {
         const val ACTION_CONFIGURE = "com.morozi.autophone.CONFIGURE"
+        const val ACTION_SPLIT = "com.morozi.autophone.SPLIT"
     }
 }

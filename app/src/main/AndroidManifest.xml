@@ -111,6 +111,7 @@
             android:permission="android.permission.DUMP">
             <intent-filter>
                 <action android:name="com.morozi.autophone.CONFIGURE" />
+                <action android:name="com.morozi.autophone.SPLIT" />
             </intent-filter>
         </receiver>
 
