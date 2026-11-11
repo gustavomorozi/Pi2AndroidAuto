@@ -140,7 +140,8 @@ gsf_id_hint() {
         done
     fi
     if [ -n "$id" ]; then
-        echo "    ID: $id"
+        echo "    ID (decimal): $id"
+        echo "    ID (hex, what the Google page asks for): $(printf '%016x' "$id")"
         echo "    Register it at https://www.google.com/android/uncertified with the Google account signed in on the Pi."
     else
         echo "    not available yet: needs adb root on the Pi, internet and the Google account signed in."
