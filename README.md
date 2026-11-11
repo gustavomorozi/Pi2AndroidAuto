@@ -131,6 +131,9 @@ Ligue o Pi à rede e ative a depuração USB/ADB. Nos exemplos, o Pi está em
   toque vira "foco + OK" e arrastar vira setas, por um teclado virtual que
   aperta e solta no mesmo instante (assim o Google TV não abre o menu
   "Abrir / Mover / Remover dos favoritos"). Apps de toque recebem o toque normal.
+- **Teclado de toque:** o `install.sh` instala o HeliBoard (teclado de
+  código aberto) e o deixa como padrão, com pressão longa em 800 ms (no Pi
+  carregado um toque rápido virava acento). `--no-keyboard` pula.
 - **Atalho "CarLink"** no menu, para abrir o CarLink (ele não tem ícone de TV).
 - **Magisk:** `tools/pi/install.sh --install-magisk <zip>`. O zip
   `KonstaKANG-rpi-magisk-v31.1.zip` precisa ser baixado à mão da página do
@@ -313,6 +316,9 @@ Put the Pi on your network and turn on USB/ADB debugging. The examples use
   becomes "focus + OK" and a drag becomes arrow keys, through a virtual keyboard
   that presses and releases at once (so Google TV does not open its "Open /
   Move / Remove from favorites" menu). Touch apps get the normal touch.
+- **Touch keyboard:** `install.sh` installs HeliBoard (open-source keyboard)
+  and makes it the default, with long press at 800 ms (on a busy Pi a quick tap
+  turned into an accent). `--no-keyboard` skips it.
 - **"CarLink" shortcut** in the menu, to open CarLink (it has no TV icon).
 - **Magisk:** `tools/pi/install.sh --install-magisk <zip>`. Download
   `KonstaKANG-rpi-magisk-v31.1.zip` by hand from the KonstaKANG page (it is on

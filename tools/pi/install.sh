@@ -2,7 +2,7 @@
 # Installs Pi2AndroidAuto on the Pi in one go: builds the app, installs it,
 # the system files from tools/pi and the CarLink app, then reboots the Pi.
 #
-#   tools/pi/install.sh [--no-build] [--no-carlink] [--no-smarttube] [--update-carlink] [--install-gapps] [--install-magisk [zip]] [pi-address]
+#   tools/pi/install.sh [--no-build] [--no-carlink] [--no-smarttube] [--no-keyboard] [--update-carlink] [--install-gapps] [--install-magisk [zip]] [pi-address]
 #   e.g. tools/pi/install.sh 192.168.0.200
 #
 # --no-build installs the APK already built instead of building it again.
@@ -36,6 +36,7 @@ build=1
 carlink=1
 update_carlink=0
 smarttube=1
+keyboard=1
 gapps=0
 magisk=0
 magisk_zip=""
@@ -46,6 +47,7 @@ while [ $# -gt 0 ]; do
         --no-carlink) carlink=0 ;;
         --update-carlink) update_carlink=1 ;;
         --no-smarttube) smarttube=0 ;;
+        --no-keyboard) keyboard=0 ;;
         --install-gapps) gapps=1 ;;
         --install-magisk)
             magisk=1
@@ -264,6 +266,51 @@ if [ "$smarttube" = 1 ]; then
             echo "    could not download SmartTube; skipped"
         fi
         rm -rf "$st"
+    fi
+fi
+
+# Touch keyboard: Android TV's own keyboards work with the remote only, not
+# with the car's touch. HeliBoard (https://github.com/HeliBorg/HeliBoard, open
+# source) is installed when missing and made the default keyboard. Its
+# long-press delay goes from 300 to 800 ms: on a busy Pi a quick tap could read
+# as a long press and type an accent ("c" became "ç").
+if [ "$keyboard" = 1 ]; then
+    hb_ime="helium314.keyboard/.latin.LatinIME"
+    if a shell pm path helium314.keyboard >/dev/null 2>&1; then
+        step "Touch keyboard (HeliBoard) already installed"
+    else
+        step "Installing the touch keyboard (HeliBoard, latest release)"
+        kb="$(mktemp -d)"
+        if curl -fsSL --retry 3 -o "$(local_path "$kb/rel.json")" https://api.github.com/repos/HeliBorg/HeliBoard/releases/latest; then
+            url="$(grep -o 'https://[^"]*HeliBoard_[0-9.]*-release\.apk' "$kb/rel.json" | head -1 || true)"
+        else
+            url=""
+        fi
+        if [ -n "$url" ] && curl -fsSL --retry 3 -o "$(local_path "$kb/kb.apk")" "$url" && unzip -tq "$kb/kb.apk" >/dev/null; then
+            echo "    $(basename "$url")  sha256 $(sha256sum "$kb/kb.apk" | cut -c1-16)..."
+            a install -r "$(local_path "$kb/kb.apk")" || echo "    HeliBoard not installed; skipped"
+        else
+            echo "    could not download HeliBoard; skipped"
+        fi
+        rm -rf "$kb"
+    fi
+    if a shell pm path helium314.keyboard >/dev/null 2>&1; then
+        a shell "ime enable $hb_ime >/dev/null; ime set $hb_ime >/dev/null; settings put secure show_ime_with_hard_keyboard 1"
+        echo "    default keyboard: HeliBoard"
+        prefs=/data/user_de/0/helium314.keyboard/shared_prefs/helium314.keyboard_preferences.xml
+        if ensure_root && a shell "[ -f $prefs ]" 2>/dev/null; then
+            a shell "am force-stop helium314.keyboard
+                if grep -q key_longpress_timeout $prefs; then
+                    sed 's|<int name=\"key_longpress_timeout\" value=\"[0-9]*\" />|<int name=\"key_longpress_timeout\" value=\"800\" />|' $prefs > /data/local/tmp/hb.xml
+                else
+                    sed 's|</map>|    <int name=\"key_longpress_timeout\" value=\"800\" />\n</map>|' $prefs > /data/local/tmp/hb.xml
+                fi
+                cat /data/local/tmp/hb.xml > $prefs; rm /data/local/tmp/hb.xml
+                ime set $hb_ime >/dev/null"
+            echo "    long-press delay: 800 ms"
+        else
+            echo "    long-press delay left at its default (open a text box once, then run this again)"
+        fi
     fi
 fi
 
