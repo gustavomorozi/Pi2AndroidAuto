@@ -46,10 +46,18 @@ class Settings(context: Context) {
 
     val maxVideoPixels: Int get() = maxVideoHeight * maxVideoHeight * 16 / 9
 
+    /**
+     * Video quality as a percentage of the normal bitrate (100): lower saves
+     * the encoder's work and the link, higher sharpens text and motion.
+     */
+    var videoQuality: Int
+        get() = prefs.getInt(KEY_QUALITY, 100)
+        set(v) = prefs.edit().putInt(KEY_QUALITY, v.coerceIn(25, 300)).apply()
+
     /** One line for logs and the status screen; never includes the password. */
     fun describe(): String =
         "modo=$mode wifi=${carWifiSsid.ifEmpty { "-" }} senha=${if (carWifiPassword.isEmpty()) "não" else "sim"} " +
-            "carro=${carHost.ifEmpty { "-" }}:$carPort escuta=$listenPort vídeo≤${maxVideoHeight}p"
+            "carro=${carHost.ifEmpty { "-" }}:$carPort escuta=$listenPort vídeo≤${maxVideoHeight}p qualidade=$videoQuality%"
 
     companion object {
         const val MODE_LISTEN = "listen"
@@ -63,5 +71,6 @@ class Settings(context: Context) {
         const val KEY_PORT = "car_port"
         const val KEY_LISTEN_PORT = "listen_port"
         const val KEY_MAX_HEIGHT = "max_video_height"
+        const val KEY_QUALITY = "video_quality"
     }
 }

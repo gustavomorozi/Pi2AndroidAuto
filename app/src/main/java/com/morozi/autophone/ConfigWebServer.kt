@@ -91,6 +91,7 @@ class ConfigWebServer(private val context: Context, private val onSaved: () -> U
         form["port"]?.toIntOrNull()?.let { settings.carPort = it }
         form["listen_port"]?.toIntOrNull()?.let { settings.listenPort = it }
         form["max_height"]?.toIntOrNull()?.let { settings.maxVideoHeight = it }
+        form["quality"]?.toIntOrNull()?.let { settings.videoQuality = it }
         Log.i(TAG, "Saved: ${settings.describe()}")
     }
 
@@ -137,6 +138,14 @@ ${CarWifi.setupNetwork?.let { "<div class=\"msg\">Wi‑Fi de configuração ativ
 <option value="720"${sel(s.maxVideoHeight == 720)}>720p (recomendado no Pi 5)</option>
 <option value="1080"${sel(s.maxVideoHeight == 1080)}>1080p</option>
 </select></label>
+<label>Qualidade do vídeo
+<select name="quality">
+<option value="50"${sel(s.videoQuality == 50)}>Baixa (leve, menos nítida)</option>
+<option value="100"${sel(s.videoQuality == 100)}>Normal</option>
+<option value="150"${sel(s.videoQuality == 150)}>Alta (texto mais nítido)</option>
+<option value="200"${sel(s.videoQuality == 200)}>Máxima</option>
+</select></label>
+<small>Vale na próxima vez que o carro conectar.</small>
 <button type="submit">Salvar</button>
 </form>
 <form method="post" action="/hotspot"><button type="submit">Criar Wi‑Fi de configuração do Pi</button></form>

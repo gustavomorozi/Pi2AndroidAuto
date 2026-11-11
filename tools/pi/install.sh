@@ -67,6 +67,23 @@ if ! timeout 60 adb "${target[@]}" wait-for-device; then
 fi
 a shell true
 
+# Android TV itself is only checked, never replaced from here: updating it
+# flashes the system and needs the Pi's recovery (TWRP) or its Updater app.
+step "Checking the Android TV build"
+os_page="https://konstakang.com/devices/rpi5/LineageOS24-ATV/"
+installed_os="$(a shell getprop ro.lineage.version | tr -d '' | grep -o '[0-9]\{8\}' | head -1 || true)"
+latest_os="$(curl -fsL -m 15 "$os_page" 2>/dev/null | grep -o 'lineage-[0-9.]*-[0-9]\{8\}-UNOFFICIAL-KonstaKANG-rpi5-atv.zip' | grep -o '[0-9]\{8\}' | sort -u | tail -1 || true)"
+if [ -z "$installed_os" ] || [ -z "$latest_os" ]; then
+    echo "    could not compare builds (Pi: ${installed_os:-?}, site: ${latest_os:-?}); skipped"
+elif [ "$latest_os" -gt "$installed_os" ]; then
+    echo "    NEWER Android TV build: $latest_os (Pi has $installed_os)."
+    echo "    Update by hand, it flashes the system: $os_page"
+    echo "    (TWRP OTA zip or the Updater app). Run this script again afterwards:"
+    echo "    it puts the Pi2AndroidAuto system files back."
+else
+    echo "    up to date ($installed_os)"
+fi
+
 
 if [ -f "$apk" ]; then
     step "Installing the app (keeps its settings)"

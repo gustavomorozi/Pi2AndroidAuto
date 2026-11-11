@@ -109,7 +109,8 @@ class WifiConnectionService : Service() {
             val session = AapSession(
                 RawLogInputStream(socket.getInputStream()),
                 socket.getOutputStream(),
-                maxVideoPixels = Settings(this).maxVideoPixels
+                maxVideoPixels = Settings(this).maxVideoPixels,
+                videoQuality = Settings(this).videoQuality
             ) { reason ->
                 Log.i(TAG, "Session ended: $reason")
             }

@@ -373,7 +373,9 @@ def run(seconds, version, switch_pid=None, pids=(0x2D00, 0x2D01), tcp=None, ccpa
 
     frames = 0
     audio_chunks = 0
+    video_bytes = 0
     audio_peak = 0
+    window_peak = 0
     end = time.time() + seconds
     next_ping = time.time() + 1
     restart_at = time.time() + seconds / 2 if restart else None
@@ -458,12 +460,16 @@ def run(seconds, version, switch_pid=None, pids=(0x2D00, 0x2D01), tcp=None, ccpa
             audio_chunks += 1
             pcm = body[8:]
             for i in range(0, len(pcm) - 1, 64):
-                audio_peak = max(audio_peak, abs(int.from_bytes(pcm[i:i + 2], "little", signed=True)))
+                level = abs(int.from_bytes(pcm[i:i + 2], "little", signed=True))
+                audio_peak = max(audio_peak, level)
+                window_peak = max(window_peak, level)
             link.send_enc(ch, MEDIA_ACK, pb_varint(1, 0) + pb_varint(2, 1))
             if audio_chunks in (1, 10) or audio_chunks % 100 == 0:
-                log(f"<- audio message #{audio_chunks} ({len(body)}B, peak {audio_peak})")
+                log(f"<- audio message #{audio_chunks} ({len(body)}B, peak {window_peak} since the last line)")
+                window_peak = 0
         elif mid in (MEDIA_DATA, MEDIA_CODEC_CONFIG):
             frames += 1
+            video_bytes += len(body)
             if dump and ch == VIDEO_CHANNEL:
                 # Raw H.264: data messages start with an 8-byte timestamp.
                 dump.write(body[8:] if mid == MEDIA_DATA else body)
@@ -472,6 +478,7 @@ def run(seconds, version, switch_pid=None, pids=(0x2D00, 0x2D01), tcp=None, ccpa
                 log(f"<- video message #{frames} ({len(body)}B)")
         else:
             log(f"<- ch{ch} id=0x{mid:x} {len(body)}B {body[:24].hex()}")
+    log(f"VIDEO: {video_bytes * 8 / max(seconds, 1) / 1e6:.2f} Mbit/s average")
     log(f"RESULT: TLS ok, {frames} video messages, {audio_chunks} audio messages (peak {audio_peak}) in {seconds}s")
     return 0
 

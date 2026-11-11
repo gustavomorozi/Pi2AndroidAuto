@@ -39,6 +39,7 @@ internal class AudioCapture(
         try {
             record.startRecording()
             Log.i(TAG, "recording playback at $sampleRate Hz")
+            fullSubmixVolume()
             val chunk = ByteArray(CHUNK_BYTES)
             var quietChunks = QUIET_CHUNKS_SENT // start as silent
             var sent = 0L
@@ -66,6 +67,23 @@ internal class AudioCapture(
             runCatching { record.stop() }
             record.release()
         }
+    }
+
+    /**
+     * While we record, Android plays into the "remote submix" output, which has
+     * its own media volume (20 of 25 by default here: the car got ~38% of the
+     * level). Set that output to full; the level the car hears is then ours
+     * ([CarVolume]) and the car's own. HDMI and other outputs keep theirs.
+     */
+    private fun fullSubmixVolume() {
+        runCatching {
+            Thread.sleep(300) // let the output switch to the submix first
+            val range = Runtime.getRuntime().exec(arrayOf("cmd", "media_session", "volume", "--stream", "3", "--get"))
+                .inputStream.bufferedReader().readText()
+            val max = Regex("""\[\d+\.\.(\d+)]""").find(range)?.groupValues?.get(1) ?: return
+            Runtime.getRuntime().exec(arrayOf("cmd", "media_session", "volume", "--stream", "3", "--set", max)).waitFor()
+            Log.i(TAG, "media volume of the capture output set to $max")
+        }.onFailure { Log.w(TAG, "could not set the capture output volume: $it") }
     }
 
     private fun isSilent(pcm: ByteArray): Boolean {

@@ -148,7 +148,7 @@ class AccessoryConnectionService : Service() {
         val output = FileOutputStream(fd.fileDescriptor)
 
         lateinit var aapSession: AapSession
-        aapSession = AapSession(input, output, maxVideoPixels = Settings(this).maxVideoPixels) { reason ->
+        aapSession = AapSession(input, output, maxVideoPixels = Settings(this).maxVideoPixels, videoQuality = Settings(this).videoQuality) { reason ->
             Log.i(TAG, "Session ended: $reason")
             // Only the current session may end the service; a replaced one just goes away.
             if (session === aapSession) {

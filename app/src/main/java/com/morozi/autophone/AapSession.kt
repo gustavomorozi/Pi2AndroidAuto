@@ -65,7 +65,8 @@ private const val TAP_MAX_MS = 600L
 private const val TAP_SLOP_PX = 20
 
 /** H.264 bitrate for the mirrored screen (more detail than the test pattern). */
-private const val SCREEN_BITRATE = 4_000_000
+private const val MIN_BITRATE = 1_000_000L
+private const val MAX_BITRATE = 16_000_000L
 
 /** Largest frame the Pi's software H.264 encoder keeps up with (1280x720). */
 private const val MAX_ENCODE_PIXELS = 1280 * 720
@@ -99,6 +100,8 @@ class AapSession(
     rawOutput: OutputStream,
     /** Largest video frame we agree to encode (from [Settings.maxVideoPixels]). */
     private val maxVideoPixels: Int = MAX_ENCODE_PIXELS,
+    /** Video quality in percent of the normal bitrate ([Settings.videoQuality]). */
+    private val videoQuality: Int = 100,
     private val onEnded: (reason: String) -> Unit
 ) {
     private val reader = AapFrameReader(rawInput)
@@ -167,6 +170,16 @@ class AapSession(
      * The Pi 5 encodes H.264 in software (~20 fps at 1280x720 measured), so
      * anything above 720p is skipped, and 60 fps is capped to 30.
      */
+    /**
+     * Bits per second for the mirrored screen: 0.35 bit per pixel per frame
+     * at normal quality (4 Mbps at 800x480, 30 fps), scaled by the setting.
+     * Text and thin lines need more than video does, hence the high rate.
+     */
+    private fun videoBitrate(config: VideoConfig): Int {
+        val normal = config.width.toLong() * config.height * config.fps * 35 / 100
+        return (normal * videoQuality / 100).coerceIn(MIN_BITRATE, MAX_BITRATE).toInt()
+    }
+
     private fun chooseVideoConfig(configs: List<VideoConfig>): Pair<Int, VideoConfig> {
         val index = configs.indexOfFirst { it.width * it.height <= maxVideoPixels }.takeIf { it >= 0 } ?: 0
         val chosen = configs.getOrElse(index) { VideoConfig(1280, 720, 30, 0, 0, 160) }
@@ -474,7 +487,7 @@ class AapSession(
             }
         }
         val client = com.morozi.autophone.screen.ScreenClient.connect(
-            config.width, config.height, config.fps, SCREEN_BITRATE,
+            config.width, config.height, config.fps, videoBitrate(config),
             if (audioOut != null) audioSampleRate else 0, onCodecConfig, onFrame, onAudio
         )
         if (client != null) audioSender?.start()

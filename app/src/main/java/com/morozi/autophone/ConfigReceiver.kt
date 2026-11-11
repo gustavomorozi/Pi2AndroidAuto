@@ -25,6 +25,7 @@ class ConfigReceiver : BroadcastReceiver() {
         intent.getStringExtra("password")?.let { s.carWifiPassword = it }
         intent.getStringExtra("mode")?.takeIf { it == Settings.MODE_LISTEN || it == Settings.MODE_CONNECT }?.let { s.mode = it }
         intent.getStringExtra("host")?.let { s.carHost = it }
+        if (intent.hasExtra("quality")) s.videoQuality = intent.getIntExtra("quality", 100)
         if (intent.hasExtra("port")) s.carPort = intent.getIntExtra("port", s.carPort)
         if (intent.hasExtra("listen_port")) s.listenPort = intent.getIntExtra("listen_port", s.listenPort)
         if (intent.hasExtra("max_height")) s.maxVideoHeight = intent.getIntExtra("max_height", s.maxVideoHeight)
