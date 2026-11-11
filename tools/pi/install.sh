@@ -54,6 +54,20 @@ if [ $# -ge 1 ]; then
     case "$addr" in *:*) ;; *) addr="$addr:5555" ;; esac
     adb connect "$addr" >/dev/null
     target=(-s "$addr")
+elif [ -n "${ANDROID_SERIAL:-}" ]; then
+    :  # adb picks that device by itself
+else
+    # No address given: use the Pi on USB, else the address used last time.
+    usb="$(adb devices | awk '$2=="device" && $1 ~ /^[0-9a-f]{16}$/ {print $1}' | head -1)"
+    last="$(cat "$HOME/.pi2androidauto_addr" 2>/dev/null || true)"
+    if [ -n "$usb" ]; then
+        target=(-s "$usb")
+    elif [ -n "$last" ]; then
+        addr="$last"
+        adb connect "$addr" >/dev/null 2>&1 || true
+        target=(-s "$addr")
+        echo "Using the address from last time: $addr"
+    fi
 fi
 a() { adb "${target[@]}" "$@"; }
 # Local paths as adb sees them (adb.exe on Windows wants C:/..., not /c/...).
@@ -61,15 +75,41 @@ local_path() { if command -v cygpath >/dev/null; then cygpath -m "$1"; else echo
 
 step() { echo "==> $*"; }
 
+# Remembers the Pi's Wi-Fi/Ethernet address for next time and shows it.
+remember_pi() {
+    local ip
+    ip="$(a shell "ip -4 -o addr show scope global | awk '{print \$4}' | cut -d/ -f1 | head -1" 2>/dev/null | tr -d '\r' | head -1 || true)"
+    if [ -n "$ip" ]; then
+        echo "$ip:5555" > "$HOME/.pi2androidauto_addr"
+        step "Pi address: $ip   (adb connect $ip:5555, ssh root@$ip)"
+    fi
+}
+
+# Root for reading /data (the Pi has no su). Returns 1 and says why when the
+# Pi's "Rooted debugging" option (Settings -> System -> Developer options) is off.
+rooted=0
+ensure_root() {
+    [ "$rooted" = 1 ] && return 0
+    local out
+    out="$(a root 2>&1 || true)"
+    case "$out" in
+        *disabled*) echo "    adb root is off on the Pi: turn on Settings -> System -> Developer options -> Rooted debugging." >&2
+                    return 1 ;;
+    esac
+    sleep 3
+    if [ ${#target[@]} -gt 0 ]; then adb connect "${target[1]}" >/dev/null 2>&1 || true; fi
+    a wait-for-device
+    rooted=1
+}
+
 # SSH is on at every boot (morozi_adbon.sh). Its login key is the Pi's own
 # ed25519 key; it is copied once to ~/.ssh/pi2androidauto_key (needs adb root),
 # and the command to use it is shown.
 ssh_hint() {
     local key="$HOME/.ssh/pi2androidauto_key" host="${addr%%:*}"
-    if [ ! -f "$key" ]; then
+    if [ ! -f "$key" ] && ensure_root; then
         mkdir -p "$HOME/.ssh"
-        # Read as root through su, so adb does not have to restart as root.
-        if a shell "su 0 cat /data/ssh/ssh_host_ed25519_key" 2>/dev/null | tr -d '\r' > "$key.tmp" \
+        if a shell "cat /data/ssh/ssh_host_ed25519_key" 2>/dev/null | tr -d '\r' > "$key.tmp" \
             && grep -q 'BEGIN OPENSSH PRIVATE KEY' "$key.tmp"; then
             mv "$key.tmp" "$key"
             chmod 600 "$key"
@@ -81,8 +121,7 @@ ssh_hint() {
     if [ -f "$key" ]; then
         echo "    ssh -i ~/.ssh/pi2androidauto_key root@${host:-<ip-do-pi>}"
     else
-        echo "    key not copied yet (the Pi creates it on its first boot with SSH on). Then:"
-        echo "    adb root && adb pull /data/ssh/ssh_host_ed25519_key ~/.ssh/pi2androidauto_key"
+        echo "    key not copied yet (needs adb root, and the Pi creates it on its first boot with SSH on)."
     fi
 }
 
@@ -92,15 +131,20 @@ ssh_hint() {
 # Registering needs your Google account, so it is not done from here.
 gsf_id_hint() {
     a shell pm path com.google.android.gms >/dev/null 2>&1 || return 0
-    local id
-    id="$(a shell "su 0 sqlite3 -readonly /data/user/0/com.google.android.gms/databases/gservices.db \"SELECT value FROM main WHERE name='android_id';\" 2>/dev/null || true" | tr -d '\r' | head -1 || true)"
+    local id="" db
     step "Google Services ID of this Pi (for Play Store certification)"
+    if ensure_root; then
+        for db in com.google.android.gsf com.google.android.gms; do
+            id="$(a shell "sqlite3 -readonly /data/user/0/$db/databases/gservices.db \"SELECT value FROM main WHERE name='android_id';\" 2>/dev/null || true" | tr -d '\r' | head -1 || true)"
+            [ -n "$id" ] && break
+        done
+    fi
     if [ -n "$id" ]; then
         echo "    ID: $id"
         echo "    Register it at https://www.google.com/android/uncertified with the Google account signed in on the Pi."
     else
-        echo "    not created yet: the Pi needs internet and the Google account signed in."
-        echo "    Do that on the Pi, then run this script again: it shows the ID."
+        echo "    not available yet: needs adb root on the Pi, internet and the Google account signed in."
+        echo "    Fix that on the Pi, then run this script again: it shows the ID."
     fi
 }
 
@@ -232,6 +276,7 @@ if [ ${#changed[@]} -gt 0 ]; then
     ssh_hint
     step "Rebooting the Pi (system files changed)"
     a reboot
+    remember_pi
     echo "Done. After boot, open Pi2AndroidAuto once on the Pi."
 else
     if [ "$app_updated" = 1 ]; then
@@ -241,5 +286,6 @@ else
     fi
     gsf_id_hint
     ssh_hint
+    remember_pi
     echo "Done. No reboot needed."
 fi
