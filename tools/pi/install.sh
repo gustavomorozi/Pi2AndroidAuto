@@ -55,6 +55,21 @@ local_path() { if command -v cygpath >/dev/null; then cygpath -m "$1"; else echo
 
 step() { echo "==> $*"; }
 
+# With Google apps installed, shows the Pi's Google Services Framework ID: the
+# one to register at https://www.google.com/android/uncertified (signed in with
+# the same Google account as on the Pi) when Play Store says "not certified".
+# Registering needs your Google account, so it is not done from here.
+gsf_id_hint() {
+    a shell pm path com.google.android.gms >/dev/null 2>&1 || return 0
+    local id
+    id="$(a shell "sqlite3 -readonly /data/user/0/com.google.android.gms/databases/gservices.db \"SELECT value FROM main WHERE name='android_id';\" 2>/dev/null" | tr -d '' | head -1)"
+    if [ -n "$id" ]; then
+        step "Google Services ID of this Pi (for Play Store certification)"
+        echo "    $id"
+        echo "    Register it at https://www.google.com/android/uncertified with the Google account signed in on the Pi."
+    fi
+}
+
 if [ "$build" = 1 ]; then
     step "Building the app"
     (cd "$repo" && sh ./gradlew -q assembleDebug)
@@ -71,7 +86,8 @@ a shell true
 # flashes the system and needs the Pi's recovery (TWRP) or its Updater app.
 step "Checking the Android TV build"
 os_page="https://konstakang.com/devices/rpi5/LineageOS24-ATV/"
-installed_os="$(a shell getprop ro.lineage.version | tr -d '' | grep -o '[0-9]\{8\}' | head -1 || true)"
+installed_os="$(a shell getprop ro.lineage.version | tr -d '
+' | grep -o '[0-9]\{8\}' | head -1 || true)"
 latest_os="$(curl -fsL -m 15 "$os_page" 2>/dev/null | grep -o 'lineage-[0-9.]*-[0-9]\{8\}-UNOFFICIAL-KonstaKANG-rpi5-atv.zip' | grep -o '[0-9]\{8\}' | sort -u | tail -1 || true)"
 if [ -z "$installed_os" ] || [ -z "$latest_os" ]; then
     echo "    could not compare builds (Pi: ${installed_os:-?}, site: ${latest_os:-?}); skipped"
@@ -175,12 +191,14 @@ fi
 if [ ${#changed[@]} -gt 0 ]; then
     step "Rebooting the Pi (system files changed)"
     a reboot
-    echo "Done. After boot, open Pi2AndroidAuto once on the Pi."
+    gsf_id_hint
+echo "Done. After boot, open Pi2AndroidAuto once on the Pi."
 else
     if [ "$app_updated" = 1 ]; then
         # The screen server runs code from the APK; restart it to load the new one.
         step "Restarting the screen server and the app"
         a shell 'setprop debug.morozi.screen 0; sleep 1; setprop debug.morozi.screen 1; am start -n com.morozi.autophone/.MainActivity >/dev/null'
     fi
+    gsf_id_hint
     echo "Done. No reboot needed."
 fi
