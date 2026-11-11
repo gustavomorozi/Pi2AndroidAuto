@@ -63,6 +63,8 @@ private const val TOUCH_ACTION_POINTER_DOWN = 5L
 /** A tap: released within this time, moved less than this (video pixels). */
 private const val TAP_MAX_MS = 600L
 private const val TAP_SLOP_PX = 20
+private const val SWIPE_MAX_MS = 2000L
+private const val MENU_CHECK_MS = 700L
 
 /** H.264 bitrate for the mirrored screen (more detail than the test pattern). */
 private const val MIN_BITRATE = 1_000_000L
@@ -570,12 +572,15 @@ class AapSession(
             }
             // V3: a second finger cancels the first finger's touch (so the app
             // does not click under it); the rest of that gesture is not sent.
-            if (action == TOUCH_ACTION_DOWN) gestureCancelled = false
-            if (!gestureCancelled && (pointers.size >= 2 || action == TOUCH_ACTION_POINTER_DOWN)) {
+            if (action == TOUCH_ACTION_DOWN) {
+                gestureCancelled = false
+                gestureSuppressed = leaveToAssist(x.toInt(), y.toInt())
+            }
+            if (!gestureCancelled && !gestureSuppressed && (pointers.size >= 2 || action == TOUCH_ACTION_POINTER_DOWN)) {
                 gestureCancelled = true
                 screen.touch(com.morozi.autophone.screen.ScreenProtocol.ACTION_CANCEL, x.toInt(), y.toInt())
             }
-            if (!gestureCancelled) screen.touch(mapped, x.toInt(), y.toInt())
+            if (!gestureCancelled && !gestureSuppressed) screen.touch(mapped, x.toInt(), y.toInt())
             trackTapForRemoteOnlyApps(action, x.toInt(), y.toInt(), pointers.size)
             return
         }
@@ -591,6 +596,29 @@ class AapSession(
     private var tapDownAt = 0L
     private var tapFingers = 0
     private var gestureCancelled = false
+    /** True for a gesture the assistant handles (taps, drags and OK as keys) instead of a raw touch. */
+    private var gestureSuppressed = false
+
+    private fun currentFit(): com.morozi.autophone.screen.ScreenFit? {
+        val config = videoConfig ?: return null
+        val metrics = android.content.res.Resources.getSystem().displayMetrics
+        return com.morozi.autophone.screen.ScreenFit.of(
+            maxOf(metrics.widthPixels, metrics.heightPixels), minOf(metrics.widthPixels, metrics.heightPixels),
+            config.width, config.height
+        )
+    }
+
+    /**
+     * In an app that only reacts to the remote (TV launchers, Play Store), a raw
+     * touch does nothing useful and the Google TV launcher read it as a long
+     * press (the "Abrir / Mover / Remover dos favoritos" menu). Those gestures
+     * go to the assistant only; a touch on our floating button still goes through.
+     */
+    private fun leaveToAssist(x: Int, y: Int): Boolean {
+        val service = com.morozi.autophone.screen.TapAssistService.instance ?: return false
+        val (sx, sy) = currentFit()?.toScreen(x, y) ?: return false
+        return !service.onControls(sx, sy) && service.frontIsRemoteOnly()
+    }
 
     /**
      * TV launchers ignore real taps (they act on remote focus and OK). A short
@@ -614,15 +642,34 @@ class AapSession(
                     Thread({ service.back() }, "aap-two-finger-back").start()
                     return
                 }
-                if (!isTap) return
                 val metrics = android.content.res.Resources.getSystem().displayMetrics
                 val fit = com.morozi.autophone.screen.ScreenFit.of(
                     maxOf(metrics.widthPixels, metrics.heightPixels), minOf(metrics.widthPixels, metrics.heightPixels),
                     config.width, config.height
                 )
                 val (sx, sy) = fit.toScreen(tapDownX, tapDownY) ?: return
+                if (!isTap) {
+                    // V4: a drag in a remote-only app scrolls it, as arrow keys.
+                    val (ex, ey) = fit.toScreen(x, y) ?: return
+                    if (tapFingers == 1 && now - tapDownAt < SWIPE_MAX_MS) {
+                        Thread({
+                            if (!service.onControls(sx, sy)) {
+                                service.swipeKeys(ex - sx, ey - sy)?.let { (key, times) -> screenClient?.key(key, times) }
+                            }
+                        }, "aap-swipe").start()
+                    }
+                    return
+                }
                 // A tap on the floating button is the button's, not the app's below it.
-                Thread({ if (!service.onControls(sx, sy)) service.tap(sx, sy) }, "aap-tap-assist").start()
+                Thread({
+                    if (!service.onControls(sx, sy) && service.tap(sx, sy)) {
+                        screenClient?.key(android.view.KeyEvent.KEYCODE_DPAD_CENTER, 1)
+                        // If the launcher took the press for a long press and opened its
+                        // item menu, "Abrir" is selected: one more OK opens the app.
+                        Thread.sleep(MENU_CHECK_MS)
+                        if (service.itemMenuShown()) screenClient?.key(android.view.KeyEvent.KEYCODE_DPAD_CENTER, 1)
+                    }
+                }, "aap-tap-assist").start()
             }
         }
     }

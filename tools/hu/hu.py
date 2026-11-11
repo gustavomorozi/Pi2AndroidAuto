@@ -340,7 +340,7 @@ def ccpa_service_discovery_response():
             + pb_bytes(2, b"Morozi") + pb_bytes(3, b"Bench CCPA"))
 
 
-def run(seconds, version, switch_pid=None, pids=(0x2D00, 0x2D01), tcp=None, ccpa=False, dump_path=None, restart=False, tap=None):
+def run(seconds, version, switch_pid=None, pids=(0x2D00, 0x2D01), tcp=None, ccpa=False, dump_path=None, restart=False, tap=None, swipes=None, holds=None):
     dump = open(dump_path, "wb") if dump_path else None
     if tcp:
         host, port = tcp.split(":")
@@ -380,6 +380,8 @@ def run(seconds, version, switch_pid=None, pids=(0x2D00, 0x2D01), tcp=None, ccpa
     next_ping = time.time() + 1
     restart_at = time.time() + seconds / 2 if restart else None
     taps = list(tap or [])
+    swipes = list(swipes or [])
+    holds = list(holds or [])
     tap_at = time.time() + seconds / 3
     while time.time() < end:
         if taps and time.time() >= tap_at:
@@ -396,6 +398,29 @@ def run(seconds, version, switch_pid=None, pids=(0x2D00, 0x2D01), tcp=None, ccpa
                 link.send_enc(1, 0x8001, pb_varint(1, int(time.time() * 1e9)) + pb_bytes(3, touch))
                 time.sleep(0.08)
             log(f"TAP sent at ({x}, {y}) with {fingers} finger(s)")
+            tap_at = time.time() + 2
+        if not taps and not swipes and holds and time.time() >= tap_at:
+            # A press that stays down (long press): down, wait, up.
+            hx, hy, ms = holds.pop(0)
+            for action, wait in ((0, ms / 1000.0), (1, 0)):
+                pointer = pb_bytes(1, pb_varint(1, hx) + pb_varint(2, hy) + pb_varint(3, 0))
+                touch = pointer + pb_varint(2, 0) + pb_varint(3, action)
+                link.send_enc(1, 0x8001, pb_varint(1, int(time.time() * 1e9)) + pb_bytes(3, touch))
+                time.sleep(wait)
+            log(f"HOLD sent at ({hx}, {hy}) for {ms} ms")
+            tap_at = time.time() + 2
+        if not taps and swipes and time.time() >= tap_at:
+            # A drag the way a finger does it: down, many moves (~60 Hz), up.
+            x1, y1, x2, y2 = swipes.pop(0)
+            steps = 14
+            for i in range(steps + 1):
+                action = 0 if i == 0 else (1 if i == steps else 2)
+                px, py = x1 + (x2 - x1) * i // steps, y1 + (y2 - y1) * i // steps
+                pointer = pb_bytes(1, pb_varint(1, px) + pb_varint(2, py) + pb_varint(3, 0))
+                touch = pointer + pb_varint(2, 0) + pb_varint(3, action)
+                link.send_enc(1, 0x8001, pb_varint(1, int(time.time() * 1e9)) + pb_bytes(3, touch))
+                time.sleep(0.016)
+            log(f"SWIPE sent {x1},{y1} -> {x2},{y2}")
             tap_at = time.time() + 2
         if restart_at and time.time() >= restart_at:
             # Start over in the same connection, as the CarlinKit CCPA does:
@@ -494,8 +519,12 @@ if __name__ == "__main__":
     ap.add_argument("--dump", help="write the received H.264 video to this file")
     ap.add_argument("--restart", action="store_true", help="halfway through, start the session over")
     ap.add_argument("--tap", action="append", help="x,y in video coordinates: a touch a third of the way through; repeat for more, 2 s apart")
+    ap.add_argument("--swipe", action="append", help="x1,y1,x2,y2: a drag in video coordinates (after the taps)")
+    ap.add_argument("--hold", action="append", help="x,y,ms: press and hold in video coordinates (after the taps and swipes)")
     ap.add_argument("--tap2", action="append", help="x,y: like --tap but with two fingers (sent after the --tap ones)")
     a = ap.parse_args()
     pids = (int(a.pid, 16),) if a.pid else (0x2D00, 0x2D01)
     tap = [(1, *map(int, t.split(","))) for t in a.tap or []] + [(2, *map(int, t.split(","))) for t in a.tap2 or []]
-    sys.exit(run(a.seconds, a.version, int(a.switch, 16) if a.switch else None, pids, a.tcp, a.ccpa, a.dump, a.restart, tap))
+    swipes = [tuple(map(int, t.split(","))) for t in a.swipe or []]
+    holds = [tuple(map(int, t.split(","))) for t in a.hold or []]
+    sys.exit(run(a.seconds, a.version, int(a.switch, 16) if a.switch else None, pids, a.tcp, a.ccpa, a.dump, a.restart, tap, swipes, holds))

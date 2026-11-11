@@ -40,11 +40,13 @@ object ScreenServer {
         val server = LocalServerSocket(ScreenProtocol.SOCKET_NAME)
         val touch = runCatching { HidTouchscreen.create() }
             .onFailure { Log.e(TAG, "virtual touchscreen failed", it) }.getOrNull()
+        val keys = runCatching { HidKeyboard.create() }
+            .onFailure { Log.e(TAG, "virtual keyboard failed", it) }.getOrNull()
         while (true) {
             val client = server.accept()
             Log.i(TAG, "app connected")
             thread(name = "screen-session") {
-                runCatching { Session(client, touch).run() }
+                runCatching { Session(client, touch, keys).run() }
                     .onFailure { Log.i(TAG, "session ended: ${it.message}") }
                 runCatching { client.close() }
             }
@@ -52,7 +54,7 @@ object ScreenServer {
     }
 
     /** One car session: encode the mirrored screen and apply the car's touches. */
-    private class Session(private val socket: LocalSocket, private val touch: HidTouchscreen?) {
+    private class Session(private val socket: LocalSocket, private val touch: HidTouchscreen?, private val keys: HidKeyboard?) {
         private val input = DataInputStream(socket.inputStream)
         private val output = DataOutputStream(socket.outputStream.buffered())
         @Volatile private var running = true
@@ -130,11 +132,32 @@ object ScreenServer {
                                 else -> touch?.down(sx, sy, screen.first, screen.second)
                             }
                         }
+                        ScreenProtocol.KEY -> {
+                            val code = input.readInt()
+                            val repeat = input.readUnsignedByte().coerceIn(1, 12)
+                            pressKey(code, repeat)
+                        }
                         else -> return
                     }
                 }
             } catch (e: Exception) {
                 running = false
+            }
+        }
+
+        /**
+         * Key presses: through the virtual keyboard (press and release together,
+         * so a slow app cannot see a long press); keys it has no usage for fall
+         * back to `input keyevent`.
+         */
+        private fun pressKey(code: Int, repeat: Int) {
+            thread(name = "screen-key") {
+                runCatching {
+                    if (keys?.press(code, repeat) != true) {
+                        val command = arrayOf("input", "keyevent") + Array(repeat) { code.toString() }
+                        Runtime.getRuntime().exec(command).waitFor()
+                    }
+                }.onFailure { Log.w(TAG, "key press failed", it) }
             }
         }
 

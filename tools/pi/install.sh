@@ -2,13 +2,15 @@
 # Installs Pi2AndroidAuto on the Pi in one go: builds the app, installs it,
 # the system files from tools/pi and the CarLink app, then reboots the Pi.
 #
-#   tools/pi/install.sh [--no-build] [--no-carlink] [--no-smarttube] [--update-carlink] [--install-gapps] [pi-address]
+#   tools/pi/install.sh [--no-build] [--no-carlink] [--no-smarttube] [--update-carlink] [--install-gapps] [--install-magisk [zip]] [pi-address]
 #   e.g. tools/pi/install.sh 192.168.0.200
 #
 # --no-build installs the APK already built instead of building it again.
 # --install-gapps first installs the Google apps (Play Store) through TWRP and
 # factory-resets the Pi: see install_gapps.sh (asks you to type ERASE). Run
 # this script again afterwards to put everything back and get the Google ID.
+# --install-magisk [zip] flashes Magisk (root) through TWRP, no data erased:
+# see install_magisk.sh (needs the KonstaKANG zip downloaded by hand; asks YES).
 # Safe to run again: the app is updated in place (its settings are kept),
 # CarLink is left alone if already installed, only changed system files are
 # copied, and the Pi reboots only when one of them changed.
@@ -35,6 +37,8 @@ carlink=1
 update_carlink=0
 smarttube=1
 gapps=0
+magisk=0
+magisk_zip=""
 carlink_pkg=com.carlink.app
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -43,6 +47,10 @@ while [ $# -gt 0 ]; do
         --update-carlink) update_carlink=1 ;;
         --no-smarttube) smarttube=0 ;;
         --install-gapps) gapps=1 ;;
+        --install-magisk)
+            magisk=1
+            # optional zip path: next argument if it is an existing file
+            if [ -n "${2:-}" ] && [ -f "$2" ]; then magisk_zip="$2"; shift; fi ;;
         -*) echo "unknown option $1" >&2; exit 2 ;;
         *) break ;;
     esac
@@ -156,6 +164,11 @@ if [ "$gapps" = 1 ]; then
     exit 0
 fi
 
+if [ "$magisk" = 1 ]; then
+    bash "$here/install_magisk.sh" ${magisk_zip:+"$magisk_zip"}
+    exit 0
+fi
+
 if [ "$build" = 1 ]; then
     step "Building the app"
     (cd "$repo" && sh ./gradlew -q assembleDebug)
@@ -261,7 +274,7 @@ trap 'rm -rf "$tmp"' EXIT
 # the Pi reboots only if one of them changed.
 files=(morozi.rc:/system/etc/init
        morozi_adbon.sh:/system/bin morozi_aoawatch.sh:/system/bin
-       morozi_usbctl.sh:/system/bin morozi_screen.sh:/system/bin
+       morozi_usbctl.sh:/system/bin morozi_screen.sh:/system/bin morozi_wifi.sh:/system/bin
        Vendor_18d1_Product_7a01.idc:/system/usr/idc)
 changed=()
 step "Checking system files"

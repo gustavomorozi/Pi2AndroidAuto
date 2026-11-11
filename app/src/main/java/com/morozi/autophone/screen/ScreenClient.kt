@@ -70,6 +70,18 @@ class ScreenClient private constructor(
         }
     }
 
+    /** [repeat] presses of an Android key code (arrow keys), made by the server. */
+    fun key(code: Int, repeat: Int) {
+        runCatching {
+            synchronized(output) {
+                output.writeByte(ScreenProtocol.KEY)
+                output.writeInt(code)
+                output.writeByte(repeat)
+                output.flush()
+            }
+        }
+    }
+
     fun stop() {
         running = false
         // close() alone does not wake a read blocked in another thread on a

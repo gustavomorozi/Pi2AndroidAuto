@@ -38,6 +38,20 @@ service morozi_screen /system/bin/sh /system/bin/morozi_screen.sh
     seclabel u:r:su:s0
     disabled
 
+# Wi-Fi watchdog: rejoin a saved network when the Pi loses its internet.
+# Stop/start: setprop debug.morozi.wifi 0 / 1
+service morozi_wifi /system/bin/sh /system/bin/morozi_wifi.sh
+    user root
+    group root
+    seclabel u:r:su:s0
+    disabled
+
+on property:debug.morozi.wifi=0
+    stop morozi_wifi
+
+on property:debug.morozi.wifi=1
+    start morozi_wifi
+
 on property:debug.morozi.screen=0
     stop morozi_screen
 
@@ -48,6 +62,7 @@ on property:sys.boot_completed=1
     start morozi_adbon
     start morozi_aoawatch
     start morozi_screen
+    start morozi_wifi
     # Present ourselves like the CarlinKit TBox does ("Google" / "Pixel"),
     # the identity its phone role uses toward the car. Takes effect on the
     # next enumeration.

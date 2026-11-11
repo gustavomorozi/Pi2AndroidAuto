@@ -10,15 +10,23 @@ data class ScreenFit(
     val left: Int, val top: Int, val width: Int, val height: Int,
     val screenWidth: Int, val screenHeight: Int
 ) {
-    /** Screen pixel for a video point, or null in the black bars. */
+    /**
+     * Screen pixel for a video point, or null in the black bars. A touch in the
+     * first [EDGE_MARGIN] pixels of a bar still counts, at the nearest screen
+     * edge: fingers hit the very top and bottom (menus, scroll bars) often.
+     */
     fun toScreen(x: Int, y: Int): Pair<Int, Int>? {
         val cx = x - left
         val cy = y - top
-        if (cx < 0 || cy < 0 || cx >= width || cy >= height) return null
-        return cx * screenWidth / width to cy * screenHeight / height
+        if (cx < -EDGE_MARGIN || cy < -EDGE_MARGIN || cx >= width + EDGE_MARGIN || cy >= height + EDGE_MARGIN) return null
+        val ix = cx.coerceIn(0, width - 1)
+        val iy = cy.coerceIn(0, height - 1)
+        return ix * screenWidth / width to iy * screenHeight / height
     }
 
     companion object {
+        const val EDGE_MARGIN = 24
+
         fun of(screenWidth: Int, screenHeight: Int, videoWidth: Int, videoHeight: Int): ScreenFit {
             val scale = minOf(videoWidth.toFloat() / screenWidth, videoHeight.toFloat() / screenHeight)
             val w = (screenWidth * scale).toInt()

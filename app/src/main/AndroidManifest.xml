@@ -53,6 +53,20 @@
             </intent-filter>
         </activity>
 
+        <!-- Menu entry that opens the CarLink app (it has no TV launcher icon). -->
+        <activity
+            android:name=".OpenCarLinkActivity"
+            android:exported="true"
+            android:banner="@drawable/ic_carlink"
+            android:icon="@drawable/ic_carlink"
+            android:label="CarLink"
+            android:theme="@android:style/Theme.NoDisplay">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
+            </intent-filter>
+        </activity>
+
         <!-- V2: car taps on remote-only TV apps (launcher, TV settings). -->
         <service
             android:name=".screen.TapAssistService"

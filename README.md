@@ -121,6 +121,22 @@ Ligue o Pi à rede e ative a depuração USB/ADB. Nos exemplos, o Pi está em
 2. **Abra o app uma vez** (ícone "Pi2AndroidAuto" no launcher) para ele
    registrar o acessório USB.
 
+### O que roda sozinho no Pi
+
+- **Wi‑Fi inteligente:** se o Pi ficar sem internet por ~30 s, ele desliga e
+  religa o Wi‑Fi para entrar na melhor rede salva (por exemplo, perdeu o
+  hotspot do celular e o Wi‑Fi de casa está ao alcance). Não lê senhas. Log em
+  `/data/local/tmp/morozi_wifi.log`; parar: `setprop debug.morozi.wifi 0`.
+- **Toque em apps de TV** (launcher do Google TV, Play Store, AirScreen): um
+  toque vira "foco + OK" e arrastar vira setas, por um teclado virtual que
+  aperta e solta no mesmo instante (assim o Google TV não abre o menu
+  "Abrir / Mover / Remover dos favoritos"). Apps de toque recebem o toque normal.
+- **Atalho "CarLink"** no menu, para abrir o CarLink (ele não tem ícone de TV).
+- **Magisk:** `tools/pi/install.sh --install-magisk <zip>`. O zip
+  `KonstaKANG-rpi-magisk-v31.1.zip` precisa ser baixado à mão da página do
+  KonstaKANG (fica no Filen); o script confere o SHA‑256, instala pelo TWRP sem
+  apagar nada e instala o app Magisk.
+
 ### Usar no carro
 
 1. Ligue o Pi na alimentação e espere o Android TV abrir.
@@ -286,6 +302,22 @@ Put the Pi on your network and turn on USB/ADB debugging. The examples use
 
 2. **Open the app once** ("Pi2AndroidAuto" in the launcher) so it registers
    the USB accessory.
+
+### What runs by itself on the Pi
+
+- **Smart Wi‑Fi:** after ~30 s without internet the Pi turns Wi‑Fi off and on
+  to join the best saved network (e.g. the phone hotspot is gone and home Wi‑Fi
+  is in range). Passwords are never read. Log: `/data/local/tmp/morozi_wifi.log`;
+  stop: `setprop debug.morozi.wifi 0`.
+- **Touch in TV apps** (Google TV launcher, Play Store, AirScreen): a tap
+  becomes "focus + OK" and a drag becomes arrow keys, through a virtual keyboard
+  that presses and releases at once (so Google TV does not open its "Open /
+  Move / Remove from favorites" menu). Touch apps get the normal touch.
+- **"CarLink" shortcut** in the menu, to open CarLink (it has no TV icon).
+- **Magisk:** `tools/pi/install.sh --install-magisk <zip>`. Download
+  `KonstaKANG-rpi-magisk-v31.1.zip` by hand from the KonstaKANG page (it is on
+  Filen); the script checks its SHA‑256, flashes it from TWRP without erasing
+  anything and installs the Magisk app.
 
 ### Use it in the car
 
