@@ -213,6 +213,8 @@ if [ -f "$apk" ]; then
     app_updated=1
     # V3: lets the floating button's "Abas" panel order apps by recent use.
     a shell appops set com.morozi.autophone GET_USAGE_STATS allow || true
+    # Bluetooth remote re-pairing (RemoteKeeper tells morozi_remote.sh).
+    a shell "pm grant com.morozi.autophone android.permission.BLUETOOTH_SCAN; pm grant com.morozi.autophone android.permission.BLUETOOTH_CONNECT; pm grant com.morozi.autophone android.permission.WRITE_SECURE_SETTINGS; pm grant com.morozi.autophone android.permission.POST_NOTIFICATIONS" || true
 else
     echo "    no APK at $apk; run without --no-build to build it"
     app_updated=0

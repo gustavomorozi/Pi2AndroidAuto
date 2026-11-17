@@ -131,6 +131,11 @@ Ligue o Pi à rede e ative a depuração USB/ADB. Nos exemplos, o Pi está em
   toque vira "foco + OK" e arrastar vira setas, por um teclado virtual que
   aperta e solta no mesmo instante (assim o Google TV não abre o menu
   "Abrir / Mover / Remover dos favoritos"). Apps de toque recebem o toque normal.
+- **Controle Bluetooth que se perde:** controles BLE genéricos (ex.: Lelong
+  LE‑7678) voltam com outro endereço depois que o Pi reinicia, e só conectam
+  esquecendo o pareamento antigo. O app percebe o controle chamando, mostra
+  "Conectando controle…", o processo root esquece o pareamento antigo, o app
+  pareia o endereço novo e mostra "Controle conectado". Basta apertar uma tecla.
 - **Teclado de toque:** o `install.sh` instala o HeliBoard (teclado de
   código aberto) e o deixa como padrão, com pressão longa em 800 ms (no Pi
   carregado um toque rápido virava acento). `--no-keyboard` pula.
@@ -316,6 +321,11 @@ Put the Pi on your network and turn on USB/ADB debugging. The examples use
   becomes "focus + OK" and a drag becomes arrow keys, through a virtual keyboard
   that presses and releases at once (so Google TV does not open its "Open /
   Move / Remove from favorites" menu). Touch apps get the normal touch.
+- **Bluetooth remote that gets lost:** generic BLE remotes (e.g. Lelong
+  LE‑7678) come back under a new address after the Pi restarts and only connect
+  once the old pairing is forgotten. The app notices the remote calling, shows
+  "Conectando controle…", root forgets the old pairing, the app pairs the new
+  address and shows "Controle conectado". Just press a key.
 - **Touch keyboard:** `install.sh` installs HeliBoard (open-source keyboard)
   and makes it the default, with long press at 800 ms (on a busy Pi a quick tap
   turned into an accent). `--no-keyboard` skips it.

@@ -78,6 +78,20 @@ check_remote() {
     fi
 }
 
+# The app (RemoteKeeper) writes this setting when the remote is back under a
+# new address; root forgets the old pairing and pairs the new address (BtTool).
+remote_back_last="$(settings get global morozi_remote_back 2>/dev/null)"
+check_remote_back() {
+    v="$(settings get global morozi_remote_back 2>/dev/null)"
+    [ -z "$v" ] || [ "$v" = null ] || [ "$v" = "$remote_back_last" ] && return
+    remote_back_last="$v"
+    # name|address|type|time
+    name="$(echo "$v" | cut -d'|' -f1)"; addr="$(echo "$v" | cut -d'|' -f2)"; type="$(echo "$v" | cut -d'|' -f3)"
+    log "remote $name back as $addr: forgetting its old pairing (the app pairs the new one)"
+    apk="$(pm path com.morozi.autophone 2>/dev/null | cut -d: -f2)"
+    CLASSPATH="$apk" timeout 60 app_process /system/bin com.morozi.autophone.screen.BtTool repair "$name" "$addr" "$type" 2>/dev/null         | grep -v linker | while IFS= read -r line; do log "remote: $line"; done
+}
+
 bad=0
 last_kick=0
 gap=$GAP_START
@@ -85,6 +99,7 @@ log "watchdog started"
 while true; do
     sleep "$INTERVAL"
     check_remote
+    check_remote_back
     case "$(cmd wifi status 2>/dev/null | head -1)" in
         *enabled*) ;;
         *) bad=0; continue ;;   # Wi-Fi is off: your choice, leave it

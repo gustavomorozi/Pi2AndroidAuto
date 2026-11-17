@@ -34,6 +34,7 @@ class TapAssistService : AccessibilityService() {
     override fun onServiceConnected() {
         CarVolume.load(this)
         controls = CarControls(this)
+        remoteKeeper = RemoteKeeper(this) { name, device -> askRepair(name, device) }.also { it.start() }
         instance = this
         Log.i(TAG, "connected")
     }
@@ -41,6 +42,7 @@ class TapAssistService : AccessibilityService() {
     override fun onDestroy() {
         if (instance === this) instance = null
         controls?.hide()
+        remoteKeeper?.stop()
         super.onDestroy()
     }
 
@@ -70,7 +72,74 @@ class TapAssistService : AccessibilityService() {
         }, BACK_DELAY_MS)
     }
 
-    override fun onAccessibilityEvent(event: AccessibilityEvent?) = Unit
+    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        if (System.currentTimeMillis() - pairingSince < 60_000) confirmPairing()
+    }
+
+    /** Presses "Parear" in Android's pairing dialog started by [askRepair]. */
+    private fun confirmPairing() {
+        for (window in windows) {
+            val root = window.root ?: continue
+            if (root.packageName?.toString() !in PAIRING_PACKAGES) continue
+            for (word in PAIR_WORDS) {
+                val node = root.findAccessibilityNodeInfosByText(word)
+                    .firstOrNull { it.text?.toString().equals(word, ignoreCase = true) } ?: continue
+                val done = (clickableAncestor(node) ?: node).performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                Log.i(TAG, "pairing dialog: pressed \"$word\" ($done)")
+                return
+            }
+        }
+    }
+
+    private var remoteKeeper: RemoteKeeper? = null
+
+    /**
+     * The Bluetooth remote came back under a new address. Re-pairing needs
+     * Android's own Settings (an app cannot forget a pairing), so the root
+     * watchdog does it; it watches this setting (WRITE_SECURE_SETTINGS is
+     * granted by tools/pi/install.sh).
+     */
+    @android.annotation.SuppressLint("MissingPermission")
+    private fun askRepair(name: String, device: android.bluetooth.BluetoothDevice) {
+        runCatching {
+            // 1. Root forgets the old pairings (an app cannot).
+            android.provider.Settings.Global.putString(
+                contentResolver, "morozi_remote_back", "$name|${device.address}|0|${System.currentTimeMillis()}"
+            )
+            Log.i(TAG, "asked the root watchdog to forget the old pairing of \"$name\"")
+            RemoteNotice.connecting(this, name)
+            pairingSince = System.currentTimeMillis()
+            // 2. Then the app pairs the new address (root is refused for that).
+            main.postDelayed({
+                val asked = runCatching { device.createBond() }.getOrDefault(false)
+                Log.i(TAG, "pairing ${device.address}: $asked")
+            }, PAIR_DELAY_MS)
+            watchRepair(name, System.currentTimeMillis())
+        }.onFailure { Log.w(TAG, "could not start the re-pairing: $it") }
+    }
+
+    private fun clickableAncestor(start: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+        var node: AccessibilityNodeInfo? = start
+        while (node != null) {
+            if (node.isClickable) return node
+            node = node.parent
+        }
+        return null
+    }
+
+    /** While set, Android's pairing confirmation for the remote gets "Parear" pressed. */
+    private var pairingSince = 0L
+
+    /** Turns the notice into "conectado" when the remote is back, or gives up after a minute. */
+    private fun watchRepair(name: String, since: Long) {
+        main.postDelayed({
+            when {
+                remoteKeeper?.anyConnected() == true -> RemoteNotice.connected(this, name)
+                System.currentTimeMillis() - since > 60_000 -> RemoteNotice.failed(this, name)
+                else -> watchRepair(name, since)
+            }
+        }, 2_000)
+    }
     override fun onInterrupt() = Unit
 
     /**
@@ -179,6 +248,9 @@ class TapAssistService : AccessibilityService() {
             "com.android.vending",
             "com.ionitech.airscreen",
         )
+        private const val PAIR_DELAY_MS = 4_000L
+        private val PAIRING_PACKAGES = setOf("com.android.tv.settings", "com.android.settings", "android", "com.android.bluetooth")
+        private val PAIR_WORDS = listOf("Parear", "Pair", "Emparelhar")
         private val MENU_MARKERS = listOf("Remover dos favoritos", "Remove from favorites")
         private const val FOCUS_SETTLE_MS = 300L
         private const val SWIPE_MIN_PX = 90
