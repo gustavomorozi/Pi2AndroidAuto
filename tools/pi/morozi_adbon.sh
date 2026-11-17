@@ -10,8 +10,11 @@ setprop service.adb.tcp.port 5555
 # Settings -> System -> Raspberry Pi settings -> SSH switches.
 setprop persist.sshd.enabled 1
 [ "$(getprop init.svc.sshd)" = running ] || start sshd
+# A car screen: keep the display on while powered (AC, USB, wireless). After the
+# default 2 h without input the screen went off and the Bluetooth remote was lost.
+settings put global stay_on_while_plugged_in 7
 # V2: the accessibility helper that turns car taps into item activation in
 # remote-only TV apps (TapAssistService).
 settings put secure enabled_accessibility_services com.morozi.autophone/com.morozi.autophone.screen.TapAssistService
 settings put secure accessibility_enabled 1
-echo "$(date +%T) adb on, tcp 5555, ssh on, tap assist on" >> /data/local/tmp/morozi_adbon.log
+echo "$(date +%T) adb on, tcp 5555, ssh on, stay awake, tap assist on" >> /data/local/tmp/morozi_adbon.log
