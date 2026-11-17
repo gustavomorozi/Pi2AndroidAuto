@@ -34,6 +34,7 @@ class TapAssistService : AccessibilityService() {
     override fun onServiceConnected() {
         CarVolume.load(this)
         controls = CarControls(this)
+        remoteKeeper = RemoteKeeper(this) { name -> startRepair(name) }.also { it.start() }
         instance = this
         Log.i(TAG, "connected")
     }
@@ -41,6 +42,7 @@ class TapAssistService : AccessibilityService() {
     override fun onDestroy() {
         if (instance === this) instance = null
         controls?.hide()
+        remoteKeeper?.stop()
         super.onDestroy()
     }
 
@@ -70,7 +72,32 @@ class TapAssistService : AccessibilityService() {
         }, BACK_DELAY_MS)
     }
 
+    private var remoteKeeper: RemoteKeeper? = null
+
     override fun onAccessibilityEvent(event: AccessibilityEvent?) = Unit
+
+    private var repair: RemoteRepairFlow? = null
+
+    /** The remote came back under a new address: forget the old pairing and pair it again. */
+    private fun startRepair(name: String) {
+        if (repair != null) return
+        val keeper = remoteKeeper ?: return
+        keeper.busy = true
+        repair = RemoteRepairFlow(this, name, keeper::anyConnected) { paired ->
+            Log.i(TAG, "remote re-pairing ended (paired=$paired)")
+            repair = null
+            keeper.busy = false
+        }.also { it.start() }
+    }
+
+    private fun clickableAncestor(start: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+        var node: AccessibilityNodeInfo? = start
+        while (node != null) {
+            if (node.isClickable) return node
+            node = node.parent
+        }
+        return null
+    }
     override fun onInterrupt() = Unit
 
     /**
